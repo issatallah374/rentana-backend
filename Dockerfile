@@ -14,4 +14,4 @@ RUN chmod +x gradlew
 RUN ./gradlew build -x test
 
 # Run the Spring Boot app (only jar after disabling plain jar)
-CMD ["java", "-jar", "build/libs/rent-api-0.0.1-SNAPSHOT.jar"]
+CMD ["java", "-jar", "build/libs/app.jar"]

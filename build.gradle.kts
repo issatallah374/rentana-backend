@@ -60,3 +60,7 @@ tasks.withType<Test> {
 tasks.jar {
     enabled = false
 }
+
+tasks.bootJar {
+    archiveFileName.set("app.jar")
+}
