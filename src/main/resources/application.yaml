@@ -29,7 +29,7 @@ spring:
 mpesa:
   consumerKey: ${MPESA_CONSUMER_KEY}
   consumerSecret: ${MPESA_CONSUMER_SECRET}
-  shortcode: ${MPESA_SHORTCODE:174379}
+  shortcode: ${MPESA_SHORTCODE}
   passkey: ${MPESA_PASSKEY}
   callbackUrl: ${MPESA_CALLBACK_URL}
 
