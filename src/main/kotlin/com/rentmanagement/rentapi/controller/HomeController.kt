@@ -6,8 +6,5 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 class HomeController {
 
-    @GetMapping("/")
-    fun home(): String {
-        return "Rent API is running"
-    }
+
 }
