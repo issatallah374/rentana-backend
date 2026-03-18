@@ -208,7 +208,7 @@ class MpesaService(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
                     landlordId = landlord.id!!,
-                    amount = safeAmount,
+                    amount = java.math.BigDecimal.valueOf(safeAmount),
                     reference = safeReference
                 )
             )
