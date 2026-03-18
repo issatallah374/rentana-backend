@@ -1,17 +1,15 @@
-# Use Java 17
-FROM eclipse-temurin:17-jdk-alpine
+# Use Java 21 (FIXED)
+FROM eclipse-temurin:21-jdk-alpine
 
-# Set working directory
 WORKDIR /app
 
-# Copy all files
 COPY . .
 
-# Give permission to gradlew (IMPORTANT)
+# Fix permissions
 RUN chmod +x gradlew
 
-# Build the Spring Boot app
+# Build app
 RUN ./gradlew build -x test
 
-# Run the app (auto-detect jar)
+# Run app (auto-detect jar)
 CMD ["sh", "-c", "java -jar $(ls build/libs/*.jar | head -n 1)"]
