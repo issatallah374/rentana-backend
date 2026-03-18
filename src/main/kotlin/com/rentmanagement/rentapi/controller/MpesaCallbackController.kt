@@ -1,6 +1,7 @@
 package com.rentmanagement.rentapi.controller
 
 import com.rentmanagement.rentapi.services.MpesaService
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
 @RestController
@@ -9,16 +10,39 @@ class MpesaCallbackController(
     private val mpesaService: MpesaService
 ) {
 
-    @PostMapping("/callback")
-    fun callback(
+    // =========================
+    // RENT PAYMENTS (TENANTS)
+    // =========================
+    @PostMapping("/payment-callback")
+    fun paymentCallback(
         @RequestBody payload: Map<String, Any>
-    ): Map<String, String> {
+    ): ResponseEntity<Map<String, String>> {
 
-        mpesaService.processCallback(payload)
+        mpesaService.processPaymentCallback(payload)
 
-        return mapOf(
-            "ResultCode" to "0",
-            "ResultDesc" to "Accepted"
+        return ResponseEntity.ok(
+            mapOf(
+                "ResultCode" to "0",
+                "ResultDesc" to "Accepted"
+            )
+        )
+    }
+
+    // =========================
+    // SUBSCRIPTIONS (YOU 💰)
+    // =========================
+    @PostMapping("/subscription-callback")
+    fun subscriptionCallback(
+        @RequestBody payload: Map<String, Any>
+    ): ResponseEntity<Map<String, String>> {
+
+        mpesaService.processSubscriptionCallback(payload)
+
+        return ResponseEntity.ok(
+            mapOf(
+                "ResultCode" to "0",
+                "ResultDesc" to "Accepted"
+            )
         )
     }
 }
