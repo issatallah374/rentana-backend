@@ -19,6 +19,20 @@ class AuthController(
     private val jwtUtil: JwtUtil
 ) {
 
+    // =========================
+    // 🔧 PHONE NORMALIZATION
+    // =========================
+    private fun normalizePhone(phone: String): String {
+        return when {
+            phone.startsWith("254") -> "0" + phone.substring(3)
+            phone.startsWith("+254") -> "0" + phone.substring(4)
+            else -> phone
+        }
+    }
+
+    // =========================
+    // 🟢 REGISTER
+    // =========================
     @PostMapping("/register")
     fun register(@RequestBody request: RegisterRequest): AuthResponse {
 
@@ -29,9 +43,19 @@ class AuthController(
             )
         }
 
+        val normalizedPhone = normalizePhone(request.phone)
+
+        if (userRepository.existsByPhone(normalizedPhone)) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Phone number already in use"
+            )
+        }
+
         val user = User(
             fullName = request.fullName,
             email = request.email,
+            phone = normalizedPhone, // 🔥 IMPORTANT
             passwordHash = passwordEncoder.encode(request.password),
             role = request.role,
             isActive = true
@@ -40,7 +64,7 @@ class AuthController(
         val savedUser = userRepository.save(user)
 
         val token = jwtUtil.generateToken(
-            savedUser.id!!,     // ✅ FIXED
+            savedUser.id!!,
             savedUser.email,
             savedUser.role
         )
@@ -48,6 +72,9 @@ class AuthController(
         return AuthResponse(token)
     }
 
+    // =========================
+    // 🔵 LOGIN
+    // =========================
     @PostMapping("/login")
     fun login(@RequestBody request: AuthRequest): AuthResponse {
 

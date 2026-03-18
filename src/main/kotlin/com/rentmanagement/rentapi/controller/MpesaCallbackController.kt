@@ -10,9 +10,7 @@ class MpesaCallbackController(
     private val mpesaService: MpesaService
 ) {
 
-    // =========================
-    // 🔵 RENT PAYMENTS (TENANTS)
-    // =========================
+    // 🔵 RENT PAYMENTS
     @PostMapping("/payment-callback")
     fun paymentCallback(
         @RequestBody payload: Map<String, Any>
@@ -28,9 +26,7 @@ class MpesaCallbackController(
         )
     }
 
-    // =========================
-    // 🟢 SUBSCRIPTIONS (YOU 💰)
-    // =========================
+    // 🟢 SUBSCRIPTIONS
     @PostMapping("/subscription-callback")
     fun subscriptionCallback(
         @RequestBody payload: Map<String, Any>

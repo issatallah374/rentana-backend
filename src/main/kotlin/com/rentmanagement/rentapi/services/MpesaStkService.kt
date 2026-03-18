@@ -29,9 +29,7 @@ class MpesaStkService(
     @Value("\${mpesa.callbackUrl}")
     lateinit var callbackUrl: String
 
-    // =========================
     // 🔐 ACCESS TOKEN
-    // =========================
     private fun getAccessToken(): String {
 
         val credentials = "$consumerKey:$consumerSecret"
@@ -49,23 +47,18 @@ class MpesaStkService(
             Map::class.java
         )
 
-        val body = response.body ?: throw RuntimeException("❌ No token response")
+        val body = response.body ?: throw RuntimeException("No token response")
 
         return body["access_token"]?.toString()
-            ?: throw RuntimeException("❌ Access token missing")
+            ?: throw RuntimeException("Access token missing")
     }
 
-    // =========================
     // 📲 STK PUSH
-    // =========================
     fun stkPush(
         phone: String,
         amount: BigDecimal,
-        accountRef: String
+        landlordId: UUID // ✅ CHANGE
     ): Any {
-
-        // 🔥 CRITICAL DEBUG LOG
-        println("🔥🔥🔥 CALLBACK URL USED: $callbackUrl")
 
         val token = getAccessToken()
 
@@ -74,6 +67,8 @@ class MpesaStkService(
         val password = Base64.getEncoder().encodeToString(
             (shortcode + passkey + timestamp).toByteArray()
         )
+
+        val accountRef = "SUB_$landlordId" // 🔥 CORE FIX
 
         val headers = HttpHeaders()
         headers.contentType = MediaType.APPLICATION_JSON
@@ -89,11 +84,12 @@ class MpesaStkService(
             "PartyB" to shortcode,
             "PhoneNumber" to phone,
             "CallBackURL" to callbackUrl,
-            "AccountReference" to accountRef,
+            "AccountReference" to accountRef, // 🔥 IMPORTANT
             "TransactionDesc" to "Rentana Subscription"
         )
 
-        println("📤 STK REQUEST PAYLOAD: $payload")
+        println("🔥 CALLBACK URL: $callbackUrl")
+        println("📤 STK PAYLOAD: $payload")
 
         val request = HttpEntity(payload, headers)
 
@@ -103,8 +99,8 @@ class MpesaStkService(
             Any::class.java
         )
 
-        println("📥 SAFARICOM RESPONSE: ${response.body}")
+        println("📥 RESPONSE: ${response.body}")
 
-        return response.body ?: "No response from Safaricom"
+        return response.body ?: "No response"
     }
 }

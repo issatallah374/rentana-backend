@@ -5,7 +5,13 @@ import java.time.LocalDateTime
 import java.util.UUID
 
 @Entity
-@Table(name = "users")
+@Table(
+    name = "users",
+    uniqueConstraints = [
+        UniqueConstraint(columnNames = ["email"]),
+        UniqueConstraint(columnNames = ["phone"])
+    ]
+)
 data class User(
 
     @Id
@@ -15,11 +21,12 @@ data class User(
     @Column(name = "full_name", nullable = false)
     var fullName: String,
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     var email: String,
 
-    @Column(nullable = true, unique = true)
-    var phone: String? = null,
+    // 🔥 IMPORTANT FOR MPESA
+    @Column(nullable = false)
+    var phone: String,
 
     @Column(name = "password_hash", nullable = false)
     var passwordHash: String,
@@ -32,4 +39,18 @@ data class User(
 
     @Column(name = "created_at", nullable = false)
     var createdAt: LocalDateTime = LocalDateTime.now()
-)
+) {
+
+    // =========================
+    // 🔧 AUTO NORMALIZE BEFORE SAVE
+    // =========================
+    @PrePersist
+    @PreUpdate
+    fun normalizePhone() {
+        phone = when {
+            phone.startsWith("254") -> "0" + phone.substring(3)
+            phone.startsWith("+254") -> "0" + phone.substring(4)
+            else -> phone
+        }
+    }
+}
