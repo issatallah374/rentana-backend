@@ -49,10 +49,10 @@ class MpesaStkService(
             Map::class.java
         )
 
-        val body = response.body ?: throw RuntimeException("No token response")
+        val body = response.body ?: throw RuntimeException("❌ No token response")
 
         return body["access_token"]?.toString()
-            ?: throw RuntimeException("Access token missing")
+            ?: throw RuntimeException("❌ Access token missing")
     }
 
     // =========================
@@ -63,6 +63,9 @@ class MpesaStkService(
         amount: BigDecimal,
         accountRef: String
     ): Any {
+
+        // 🔥 CRITICAL DEBUG LOG
+        println("🔥🔥🔥 CALLBACK URL USED: $callbackUrl")
 
         val token = getAccessToken()
 
@@ -90,6 +93,8 @@ class MpesaStkService(
             "TransactionDesc" to "Rentana Subscription"
         )
 
+        println("📤 STK REQUEST PAYLOAD: $payload")
+
         val request = HttpEntity(payload, headers)
 
         val response = restTemplate.postForEntity(
@@ -97,6 +102,8 @@ class MpesaStkService(
             request,
             Any::class.java
         )
+
+        println("📥 SAFARICOM RESPONSE: ${response.body}")
 
         return response.body ?: "No response from Safaricom"
     }
