@@ -25,7 +25,7 @@ class MpesaService(
     private val objectMapper = ObjectMapper()
 
     // =========================================================
-    // 🔵 TENANT RENT PAYMENTS
+    // 🔵 TENANT RENT PAYMENTS (UNCHANGED)
     // =========================================================
     fun processPaymentCallback(payload: Map<String, Any>) {
 
@@ -119,7 +119,7 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🟢 SUBSCRIPTIONS (YOUR MONEY 💰)
+    // 🟢 SUBSCRIPTIONS (🔥 FIXED PRODUCTION LOGIC)
     // =========================================================
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
@@ -140,35 +140,38 @@ class MpesaService(
 
             var amount: BigDecimal? = null
             var reference: String? = null
-            var phone: String? = null
+            var account: String? = null
 
             for (item in items) {
                 when (item["Name"]) {
                     "Amount" -> amount = BigDecimal((item["Value"] as Number).toString())
                     "MpesaReceiptNumber" -> reference = item["Value"].toString()
-                    "PhoneNumber" -> phone = item["Value"].toString()
+                    "AccountReference" -> account = item["Value"].toString()
                 }
             }
 
             val safeAmount = amount ?: return
             val safeReference = reference ?: return
-            val safePhone = phone ?: return
+            val safeAccount = account ?: return
 
-            val normalizedPhone = normalizePhone(safePhone)
+            log.info("💸 SUBSCRIPTION → amount=$safeAmount account=$safeAccount")
 
-            log.info("💸 SUBSCRIPTION → $safeAmount")
+            // 🔥 EXTRACT LANDLORD ID FROM ACCOUNT REFERENCE
+            val landlordId = safeAccount.removePrefix("SUB_")
 
+            val landlord = userRepository.findById(UUID.fromString(landlordId))
+                .orElseThrow { RuntimeException("Landlord not found") }
+
+            // 🛑 Prevent duplicate transactions
             if (platformTransactionRepository.existsByReference(safeReference)) {
-                log.warn("⚠️ Duplicate subscription")
+                log.warn("⚠️ Duplicate subscription ignored")
                 return
             }
-
-            val landlord = userRepository.findByPhone(normalizedPhone)
-                ?: throw RuntimeException("Landlord not found")
 
             val plan = subscriptionPlanRepository.findMatchingPlan(safeAmount)
                 ?: throw RuntimeException("Plan not found")
 
+            // 💰 Save platform revenue
             platformTransactionRepository.save(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
@@ -178,16 +181,19 @@ class MpesaService(
                 )
             )
 
+            // 💰 Update platform wallet
             jdbcTemplate.update(
                 "UPDATE platform_wallet SET balance = balance + ?",
                 safeAmount
             )
 
+            // 🔄 Expire old subscriptions
             jdbcTemplate.update(
                 "UPDATE subscriptions SET status = 'EXPIRED' WHERE landlord_id = ?",
                 landlord.id
             )
 
+            // ✅ Create new subscription
             val start = LocalDateTime.now()
 
             subscriptionRepository.save(
@@ -201,18 +207,10 @@ class MpesaService(
                 )
             )
 
-            log.info("✅ Subscription activated")
+            log.info("✅ Subscription activated successfully")
 
         } catch (e: Exception) {
             log.error("❌ Subscription callback failed", e)
-        }
-    }
-
-    private fun normalizePhone(phone: String): String {
-        return when {
-            phone.startsWith("254") -> "0" + phone.substring(3)
-            phone.startsWith("+254") -> "0" + phone.substring(4)
-            else -> phone
         }
     }
 }
