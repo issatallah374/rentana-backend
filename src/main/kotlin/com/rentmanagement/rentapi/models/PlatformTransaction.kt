@@ -1,7 +1,7 @@
 package com.rentmanagement.rentapi.models
 
 import jakarta.persistence.*
-import java.time.LocalDateTime
+import java.math.BigDecimal
 import java.util.*
 
 @Entity
@@ -14,10 +14,9 @@ data class PlatformTransaction(
     @Column(name = "landlord_id")
     val landlordId: UUID,
 
-    val amount: Double,
+    @Column(nullable = false)
+    val amount: BigDecimal,
 
-    val reference: String,
-
-    @Column(name = "created_at")
-    val createdAt: LocalDateTime = LocalDateTime.now()
+    @Column(nullable = false)
+    val reference: String
 )
