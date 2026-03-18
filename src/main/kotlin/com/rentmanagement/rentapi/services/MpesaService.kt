@@ -30,7 +30,6 @@ class MpesaService(
     fun processPaymentCallback(payload: Map<String, Any>) {
 
         try {
-
             val callback = payload["Body"]
                 ?.let { it as? Map<*, *> }
                 ?.get("stkCallback") as? Map<*, *> ?: return
@@ -63,11 +62,10 @@ class MpesaService(
             val safeReference = reference ?: return
             val safeAccount = account ?: return
 
-            log.info("💰 RENT PAYMENT → ref=$safeReference amount=$safeAmount account=$safeAccount")
+            log.info("💰 RENT PAYMENT → ref=$safeReference amount=$safeAmount")
 
             val jsonPayload = objectMapper.writeValueAsString(payload)
 
-            // Prevent duplicate
             val exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM mpesa_transactions WHERE transaction_code = ?",
                 Int::class.java,
@@ -75,11 +73,10 @@ class MpesaService(
             ) ?: 0
 
             if (exists > 0) {
-                log.warn("⚠️ Duplicate transaction ignored: $safeReference")
+                log.warn("⚠️ Duplicate transaction ignored")
                 return
             }
 
-            // Save transaction
             jdbcTemplate.update(
                 """
                 INSERT INTO mpesa_transactions(
@@ -99,12 +96,11 @@ class MpesaService(
             )
 
             val unit = unitRepository.findByReferenceNumber(safeAccount)
-                ?: return log.warn("❌ Unit not found: $safeAccount")
+                ?: return log.warn("❌ Unit not found")
 
             val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
                 ?: return log.warn("❌ No active tenancy")
 
-            // 🔥 Process payment in DB
             jdbcTemplate.execute(
                 "SELECT process_payment(?::uuid, ?::numeric, ?)",
                 { ps ->
@@ -115,7 +111,7 @@ class MpesaService(
                 }
             )
 
-            log.info("✅ RENT processed successfully")
+            log.info("✅ RENT processed")
 
         } catch (e: Exception) {
             log.error("❌ Rent callback failed", e)
@@ -128,14 +124,13 @@ class MpesaService(
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
         try {
-
             val callback = payload["Body"]
                 ?.let { it as? Map<*, *> }
                 ?.get("stkCallback") as? Map<*, *> ?: return
 
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
             if (resultCode != 0) {
-                log.warn("❌ Subscription payment failed")
+                log.warn("❌ Subscription failed")
                 return
             }
 
@@ -161,11 +156,10 @@ class MpesaService(
 
             val normalizedPhone = normalizePhone(safePhone)
 
-            log.info("💸 SUBSCRIPTION → phone=$normalizedPhone amount=$safeAmount")
+            log.info("💸 SUBSCRIPTION → $safeAmount")
 
-            // Prevent duplicate
             if (platformTransactionRepository.existsByReference(safeReference)) {
-                log.warn("⚠️ Duplicate subscription ignored: $safeReference")
+                log.warn("⚠️ Duplicate subscription")
                 return
             }
 
@@ -173,9 +167,8 @@ class MpesaService(
                 ?: throw RuntimeException("Landlord not found")
 
             val plan = subscriptionPlanRepository.findMatchingPlan(safeAmount)
-                ?: throw RuntimeException("Plan not found for amount: $safeAmount")
+                ?: throw RuntimeException("Plan not found")
 
-            // Save revenue
             platformTransactionRepository.save(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
@@ -185,21 +178,17 @@ class MpesaService(
                 )
             )
 
-            // Update wallet
             jdbcTemplate.update(
                 "UPDATE platform_wallet SET balance = balance + ?",
                 safeAmount
             )
 
-            // Expire old subscriptions
             jdbcTemplate.update(
                 "UPDATE subscriptions SET status = 'EXPIRED' WHERE landlord_id = ?",
                 landlord.id
             )
 
-            // Create new subscription
             val start = LocalDateTime.now()
-            val end = start.plusMonths(1)
 
             subscriptionRepository.save(
                 Subscription(
@@ -207,12 +196,12 @@ class MpesaService(
                     landlordId = landlord.id!!,
                     planId = plan.id!!,
                     startDate = start,
-                    endDate = end,
+                    endDate = start.plusMonths(1),
                     status = "ACTIVE"
                 )
             )
 
-            log.info("✅ Subscription activated successfully")
+            log.info("✅ Subscription activated")
 
         } catch (e: Exception) {
             log.error("❌ Subscription callback failed", e)
