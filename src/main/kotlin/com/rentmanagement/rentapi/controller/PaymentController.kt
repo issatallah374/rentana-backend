@@ -2,16 +2,22 @@ package com.rentmanagement.rentapi.controller
 
 import com.rentmanagement.rentapi.dto.PaymentResponse
 import com.rentmanagement.rentapi.repository.PaymentRepository
+import com.rentmanagement.rentapi.services.MpesaStkService
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
+import java.math.BigDecimal
 import java.util.UUID
 
 @RestController
 @RequestMapping("/api/payments")
 class PaymentController(
-    private val paymentRepository: PaymentRepository
+    private val paymentRepository: PaymentRepository,
+    private val mpesaStkService: MpesaStkService
 ) {
 
-    // ✅ EXISTING (keep if needed elsewhere)
+    // =========================
+    // 📄 TENANCY PAYMENTS
+    // =========================
     @GetMapping("/tenancy/{tenancyId}")
     fun getPaymentsByTenancy(
         @PathVariable tenancyId: String
@@ -31,7 +37,9 @@ class PaymentController(
             }
     }
 
-    // ✅ NEW — Payments by Property
+    // =========================
+    // 🏢 PROPERTY PAYMENTS
+    // =========================
     @GetMapping("/property/{propertyId}")
     fun getPaymentsByProperty(
         @PathVariable propertyId: String
@@ -49,5 +57,23 @@ class PaymentController(
                     paymentDate = it.paymentDate
                 )
             }
+    }
+
+    // =========================
+    // 💰 LANDLORD SUBSCRIPTION STK
+    // =========================
+    @PostMapping("/stk/subscribe")
+    fun initiateSubscriptionSTK(
+        @RequestParam phone: String,
+        @RequestParam amount: BigDecimal
+    ): ResponseEntity<Any> {
+
+        val response = mpesaStkService.stkPush(
+            phone = phone,
+            amount = amount,
+            accountRef = "SUBSCRIPTION"
+        )
+
+        return ResponseEntity.ok(response)
     }
 }

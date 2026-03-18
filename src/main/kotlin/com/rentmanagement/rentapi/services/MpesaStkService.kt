@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.*
 import org.springframework.stereotype.Service
 import org.springframework.web.client.RestTemplate
+import java.math.BigDecimal
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.Base64
@@ -28,7 +29,11 @@ class MpesaStkService(
     @Value("\${mpesa.callbackUrl}")
     lateinit var callbackUrl: String
 
+    // =========================
+    // 🔐 ACCESS TOKEN
+    // =========================
     private fun getAccessToken(): String {
+
         val credentials = "$consumerKey:$consumerSecret"
         val encoded = Base64.getEncoder().encodeToString(credentials.toByteArray())
 
@@ -38,20 +43,31 @@ class MpesaStkService(
         val request = HttpEntity<String>(headers)
 
         val response = restTemplate.exchange(
-            "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+            "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
             HttpMethod.GET,
             request,
             Map::class.java
         )
 
-        return response.body?.get("access_token").toString()
+        val body = response.body ?: throw RuntimeException("No token response")
+
+        return body["access_token"]?.toString()
+            ?: throw RuntimeException("Access token missing")
     }
 
-    fun stkPush(phone: String, amount: String, accountRef: String): Any {
+    // =========================
+    // 📲 STK PUSH
+    // =========================
+    fun stkPush(
+        phone: String,
+        amount: BigDecimal,
+        accountRef: String
+    ): Any {
 
         val token = getAccessToken()
 
         val timestamp = SimpleDateFormat("yyyyMMddHHmmss").format(Date())
+
         val password = Base64.getEncoder().encodeToString(
             (shortcode + passkey + timestamp).toByteArray()
         )
@@ -77,11 +93,11 @@ class MpesaStkService(
         val request = HttpEntity(payload, headers)
 
         val response = restTemplate.postForEntity(
-            "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
+            "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
             request,
             Any::class.java
         )
 
-        return response.body!!
+        return response.body ?: "No response from Safaricom"
     }
 }
