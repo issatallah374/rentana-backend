@@ -1,6 +1,7 @@
 package com.rentmanagement.rentapi.models
 
 import jakarta.persistence.*
+import java.math.BigDecimal
 import java.util.*
 
 @Entity
@@ -12,7 +13,7 @@ data class SubscriptionPlan(
 
     val name: String,
 
-    val price: Double,
+    var price: BigDecimal,
 
     @Column(name = "property_limit")
     val propertyLimit: Int

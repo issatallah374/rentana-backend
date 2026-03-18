@@ -6,6 +6,7 @@ import com.rentmanagement.rentapi.models.*
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.slf4j.LoggerFactory
+import java.math.BigDecimal
 import java.time.LocalDateTime
 import java.util.*
 
@@ -35,7 +36,6 @@ class MpesaService(
                 ?.get("stkCallback") as? Map<*, *> ?: return
 
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
-
             if (resultCode != 0) {
                 log.warn("❌ Payment failed or cancelled")
                 return
@@ -45,30 +45,20 @@ class MpesaService(
                 ?.let { it as? Map<*, *> }
                 ?.get("Item") as? List<Map<String, Any>> ?: return
 
-            var amount: Double? = null
+            var amount: BigDecimal? = null
             var reference: String? = null
             var phone: String? = null
             var account: String? = null
 
-            // ✅ FIXED LOOP (no forEach)
             for (item in items) {
                 when (item["Name"]) {
-
-                    "Amount" ->
-                        amount = (item["Value"] as Number).toDouble()
-
-                    "MpesaReceiptNumber" ->
-                        reference = item["Value"].toString()
-
-                    "PhoneNumber" ->
-                        phone = item["Value"].toString()
-
-                    "AccountReference" ->
-                        account = item["Value"].toString()
+                    "Amount" -> amount = BigDecimal((item["Value"] as Number).toString())
+                    "MpesaReceiptNumber" -> reference = item["Value"].toString()
+                    "PhoneNumber" -> phone = item["Value"].toString()
+                    "AccountReference" -> account = item["Value"].toString()
                 }
             }
 
-            // ✅ SAFE VALUES
             val safeAmount = amount ?: return
             val safeReference = reference ?: return
             val safeAccount = account ?: return
@@ -77,7 +67,7 @@ class MpesaService(
 
             val jsonPayload = objectMapper.writeValueAsString(payload)
 
-            // 🛑 Prevent duplicate
+            // Prevent duplicate
             val exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM mpesa_transactions WHERE transaction_code = ?",
                 Int::class.java,
@@ -109,23 +99,17 @@ class MpesaService(
             )
 
             val unit = unitRepository.findByReferenceNumber(safeAccount)
-                ?: run {
-                    log.warn("❌ Unit not found: $safeAccount")
-                    return
-                }
+                ?: return log.warn("❌ Unit not found: $safeAccount")
 
             val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
-                ?: run {
-                    log.warn("❌ No active tenancy")
-                    return
-                }
+                ?: return log.warn("❌ No active tenancy")
 
-            // 🔥 CORE PAYMENT FUNCTION
+            // 🔥 Process payment in DB
             jdbcTemplate.execute(
                 "SELECT process_payment(?::uuid, ?::numeric, ?)",
                 { ps ->
                     ps.setObject(1, tenancy.id)
-                    ps.setDouble(2, safeAmount)
+                    ps.setBigDecimal(2, safeAmount)
                     ps.setString(3, safeReference)
                     ps.execute()
                 }
@@ -150,7 +134,6 @@ class MpesaService(
                 ?.get("stkCallback") as? Map<*, *> ?: return
 
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
-
             if (resultCode != 0) {
                 log.warn("❌ Subscription payment failed")
                 return
@@ -160,26 +143,18 @@ class MpesaService(
                 ?.let { it as? Map<*, *> }
                 ?.get("Item") as? List<Map<String, Any>> ?: return
 
-            var amount: Double? = null
+            var amount: BigDecimal? = null
             var reference: String? = null
             var phone: String? = null
 
-            // ✅ FIXED LOOP
             for (item in items) {
                 when (item["Name"]) {
-
-                    "Amount" ->
-                        amount = (item["Value"] as Number).toDouble()
-
-                    "MpesaReceiptNumber" ->
-                        reference = item["Value"].toString()
-
-                    "PhoneNumber" ->
-                        phone = item["Value"].toString()
+                    "Amount" -> amount = BigDecimal((item["Value"] as Number).toString())
+                    "MpesaReceiptNumber" -> reference = item["Value"].toString()
+                    "PhoneNumber" -> phone = item["Value"].toString()
                 }
             }
 
-            // ✅ SAFE VALUES
             val safeAmount = amount ?: return
             val safeReference = reference ?: return
             val safePhone = phone ?: return
@@ -188,11 +163,8 @@ class MpesaService(
 
             log.info("💸 SUBSCRIPTION → phone=$normalizedPhone amount=$safeAmount")
 
-            // 🛑 Prevent duplicate
-            val exists = platformTransactionRepository.findAll()
-                .any { it.reference == safeReference }
-
-            if (exists) {
+            // Prevent duplicate
+            if (platformTransactionRepository.existsByReference(safeReference)) {
                 log.warn("⚠️ Duplicate subscription ignored: $safeReference")
                 return
             }
@@ -203,33 +175,29 @@ class MpesaService(
             val plan = subscriptionPlanRepository.findMatchingPlan(safeAmount)
                 ?: throw RuntimeException("Plan not found for amount: $safeAmount")
 
-            // 💰 Save revenue
+            // Save revenue
             platformTransactionRepository.save(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
                     landlordId = landlord.id!!,
-                    amount = java.math.BigDecimal.valueOf(safeAmount),
+                    amount = safeAmount,
                     reference = safeReference
                 )
             )
 
-            // 💰 Update platform wallet
+            // Update wallet
             jdbcTemplate.update(
                 "UPDATE platform_wallet SET balance = balance + ?",
                 safeAmount
             )
 
-            // 🔄 Expire old subscriptions
+            // Expire old subscriptions
             jdbcTemplate.update(
-                """
-                UPDATE subscriptions 
-                SET status = 'EXPIRED' 
-                WHERE landlord_id = ?
-                """,
+                "UPDATE subscriptions SET status = 'EXPIRED' WHERE landlord_id = ?",
                 landlord.id
             )
 
-            // ✅ New subscription
+            // Create new subscription
             val start = LocalDateTime.now()
             val end = start.plusMonths(1)
 
@@ -251,9 +219,6 @@ class MpesaService(
         }
     }
 
-    // =========================================================
-    // 📱 PHONE NORMALIZATION
-    // =========================================================
     private fun normalizePhone(phone: String): String {
         return when {
             phone.startsWith("254") -> "0" + phone.substring(3)
