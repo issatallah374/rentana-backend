@@ -60,18 +60,19 @@ class PaymentController(
     }
 
     // =========================
-    // 💰 LANDLORD SUBSCRIPTION STK
+    // 💰 LANDLORD SUBSCRIPTION STK (🔥 FIXED)
     // =========================
     @PostMapping("/stk/subscribe")
     fun initiateSubscriptionSTK(
         @RequestParam phone: String,
-        @RequestParam amount: BigDecimal
+        @RequestParam amount: BigDecimal,
+        @RequestParam landlordId: UUID // ✅ REQUIRED
     ): ResponseEntity<Any> {
 
         val response = mpesaStkService.stkPush(
             phone = phone,
             amount = amount,
-            accountRef = "SUBSCRIPTION"
+            landlordId = landlordId // ✅ FIXED
         )
 
         return ResponseEntity.ok(response)
