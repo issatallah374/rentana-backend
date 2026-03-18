@@ -11,7 +11,7 @@ class MpesaCallbackController(
 ) {
 
     // =========================
-    // RENT PAYMENTS (TENANTS)
+    // 🔵 RENT PAYMENTS (TENANTS)
     // =========================
     @PostMapping("/payment-callback")
     fun paymentCallback(
@@ -29,7 +29,7 @@ class MpesaCallbackController(
     }
 
     // =========================
-    // SUBSCRIPTIONS (YOU 💰)
+    // 🟢 SUBSCRIPTIONS (YOU 💰)
     // =========================
     @PostMapping("/subscription-callback")
     fun subscriptionCallback(
