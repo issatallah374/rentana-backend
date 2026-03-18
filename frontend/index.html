@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rent System</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<h1>Rent Management</h1>
+
+<div class="card">
+    <h3>Status</h3>
+    <p id="status">Not logged in</p>
+</div>
+
+<!-- REGISTER -->
+<div class="card">
+    <h2>Register</h2>
+    <input id="regName" placeholder="Full Name">
+    <input id="regEmail" placeholder="Email">
+    <input id="regPassword" placeholder="Password" type="password">
+    <button onclick="register()">Register</button>
+</div>
+
+<!-- CREATE PROPERTY -->
+<div class="card">
+    <h2>Create Property</h2>
+    <input id="propName" placeholder="Name">
+    <input id="propAddress" placeholder="Address">
+    <input id="propCity" placeholder="City">
+    <input id="propCountry" placeholder="Country">
+    <button onclick="createProperty()">Create Property</button>
+</div>
+
+<!-- CREATE UNIT -->
+<div class="card">
+    <h2>Create Unit</h2>
+    <input id="unitNumber" placeholder="Unit Number">
+    <input id="unitRent" placeholder="Rent Amount">
+    <button onclick="createUnit()">Create Unit</button>
+</div>
+
+<!-- CREATE TENANT -->
+<div class="card">
+    <h2>Create Tenant</h2>
+    <input id="tenantName" placeholder="Full Name">
+    <input id="tenantPhone" placeholder="Phone">
+    <button onclick="createTenant()">Create Tenant</button>
+</div>
+
+<!-- CREATE TENANCY -->
+<div class="card">
+    <h2>Create Tenancy</h2>
+    <input id="tenancyRent" placeholder="Rent">
+    <input id="tenancyStart" placeholder="Start Date YYYY-MM-DD">
+    <button onclick="createTenancy()">Create Tenancy</button>
+</div>
+
+<script src="app.js"></script>
+
+</body>
+</html>
