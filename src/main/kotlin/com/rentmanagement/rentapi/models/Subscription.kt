@@ -2,26 +2,31 @@ package com.rentmanagement.rentapi.models
 
 import jakarta.persistence.*
 import java.time.LocalDateTime
-import java.util.*
+import java.util.UUID
 
 @Entity
 @Table(name = "subscriptions")
 data class Subscription(
 
     @Id
-    val id: UUID,
+    @GeneratedValue(strategy = GenerationType.UUID)
+    var id: UUID? = null,
 
-    @Column(name = "landlord_id")
-    val landlordId: UUID,
+    @Column(name = "landlord_id", nullable = false)
+    var landlordId: UUID,
 
-    @Column(name = "plan_id")
-    val planId: UUID,
+    @Column(name = "plan_id", nullable = false)
+    var planId: UUID,
 
     @Column(name = "start_date")
-    val startDate: LocalDateTime,
+    var startDate: LocalDateTime? = null,
 
     @Column(name = "end_date")
-    val endDate: LocalDateTime,
+    var endDate: LocalDateTime? = null,
 
-    val status: String
+    @Column(nullable = false)
+    var status: String = "ACTIVE",
+
+    @Column(name = "created_at")
+    var createdAt: LocalDateTime = LocalDateTime.now()
 )
