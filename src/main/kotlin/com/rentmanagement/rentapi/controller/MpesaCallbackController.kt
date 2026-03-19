@@ -7,7 +7,6 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
 @RestController
-@RequestMapping("/api/mpesa")
 class MpesaCallbackController(
     private val mpesaService: MpesaService
 ) {
@@ -17,7 +16,7 @@ class MpesaCallbackController(
     // =====================================================
     // 🔥 STK PUSH (APP INITIATED)
     // =====================================================
-    @PostMapping("/stk")
+    @PostMapping("/api/mpesa/stk")
     fun triggerStk(
         @RequestBody request: StkPushRequest
     ): ResponseEntity<Map<String, String>> {
@@ -28,15 +27,13 @@ class MpesaCallbackController(
             request.landlordId
         )
 
-        return ResponseEntity.ok(
-            mapOf("message" to "STK push sent")
-        )
+        return ResponseEntity.ok(mapOf("message" to "STK push sent"))
     }
 
     // =====================================================
-    // 🔵 STK CALLBACK (APP PAYMENTS)
+    // 🔵 STK CALLBACK
     // =====================================================
-    @PostMapping("/payment-callback")
+    @PostMapping("/api/mpesa/payment-callback")
     fun paymentCallback(
         @RequestBody payload: Map<String, Any>
     ): ResponseEntity<Map<String, String>> {
@@ -46,36 +43,29 @@ class MpesaCallbackController(
         mpesaService.processPaymentCallback(payload)
 
         return ResponseEntity.ok(
-            mapOf(
-                "ResultCode" to "0",
-                "ResultDesc" to "Accepted"
-            )
+            mapOf("ResultCode" to "0", "ResultDesc" to "Accepted")
         )
     }
 
     // =====================================================
-    // 🟢 C2B VALIDATION (PAYBILL STEP 1)
+    // 🟢 C2B VALIDATION (PAYBILL)
     // =====================================================
-    @PostMapping("/c2b-validation")
+    @PostMapping("/api/c2b/validation")
     fun c2bValidation(
         @RequestBody payload: Map<String, Any>
     ): ResponseEntity<Map<String, String>> {
 
         log.info("🟢 C2B VALIDATION → $payload")
 
-        // For now: always accept all payments
         return ResponseEntity.ok(
-            mapOf(
-                "ResultCode" to "0",
-                "ResultDesc" to "Accepted"
-            )
+            mapOf("ResultCode" to "0", "ResultDesc" to "Accepted")
         )
     }
 
     // =====================================================
-    // 🟢 C2B CONFIRMATION (🔥 REAL PAYBILL PAYMENTS)
+    // 🟢 C2B CONFIRMATION (🔥 REAL MONEY)
     // =====================================================
-    @PostMapping("/c2b-confirmation")
+    @PostMapping("/api/c2b/confirmation")
     fun c2bConfirmation(
         @RequestBody payload: Map<String, Any>
     ): ResponseEntity<Map<String, String>> {
@@ -85,17 +75,14 @@ class MpesaCallbackController(
         mpesaService.processC2BPayment(payload)
 
         return ResponseEntity.ok(
-            mapOf(
-                "ResultCode" to "0",
-                "ResultDesc" to "Accepted"
-            )
+            mapOf("ResultCode" to "0", "ResultDesc" to "Accepted")
         )
     }
 
     // =====================================================
     // 🟢 SUBSCRIPTION CALLBACK
     // =====================================================
-    @PostMapping("/subscription-callback")
+    @PostMapping("/api/mpesa/subscription-callback")
     fun subscriptionCallback(
         @RequestBody payload: Map<String, Any>
     ): ResponseEntity<Map<String, String>> {
@@ -105,10 +92,7 @@ class MpesaCallbackController(
         mpesaService.processSubscriptionCallback(payload)
 
         return ResponseEntity.ok(
-            mapOf(
-                "ResultCode" to "0",
-                "ResultDesc" to "Accepted"
-            )
+            mapOf("ResultCode" to "0", "ResultDesc" to "Accepted")
         )
     }
 }
