@@ -14,7 +14,7 @@ import java.util.Base64
 @Service
 class MpesaStkService(
     private val restTemplate: RestTemplate,
-    private val stkRequestRepository: StkRequestRepository // ✅ NEW
+    private val stkRequestRepository: StkRequestRepository
 ) {
 
     @Value("\${mpesa.consumerKey}")
@@ -32,7 +32,9 @@ class MpesaStkService(
     @Value("\${mpesa.callbackUrl}")
     lateinit var callbackUrl: String
 
+    // =========================================================
     // 🔐 ACCESS TOKEN
+    // =========================================================
     private fun getAccessToken(): String {
 
         val credentials = "$consumerKey:$consumerSecret"
@@ -56,71 +58,98 @@ class MpesaStkService(
             ?: throw RuntimeException("Access token missing")
     }
 
-    // 📲 STK PUSH
+    // =========================================================
+    // 📞 PHONE NORMALIZATION (CRITICAL 🔥)
+    // =========================================================
+    private fun normalizePhone(phone: String): String {
+        return when {
+            phone.startsWith("0") -> "254" + phone.substring(1)
+            phone.startsWith("+254") -> phone.substring(1)
+            phone.startsWith("254") -> phone
+            else -> throw RuntimeException("Invalid phone format")
+        }
+    }
+
+    // =========================================================
+    // 📲 STK PUSH (PRODUCTION READY)
+    // =========================================================
     fun stkPush(
         phone: String,
         amount: BigDecimal,
         landlordId: UUID
     ): Any {
 
-        val token = getAccessToken()
+        try {
 
-        val timestamp = SimpleDateFormat("yyyyMMddHHmmss").format(Date())
+            val formattedPhone = normalizePhone(phone)
 
-        val password = Base64.getEncoder().encodeToString(
-            (shortcode + passkey + timestamp).toByteArray()
-        )
+            val token = getAccessToken()
 
-        val accountRef = "SUB_$landlordId"
+            val timestamp = SimpleDateFormat("yyyyMMddHHmmss").format(Date())
 
-        val headers = HttpHeaders()
-        headers.contentType = MediaType.APPLICATION_JSON
-        headers.setBearerAuth(token)
-
-        val payload = mapOf(
-            "BusinessShortCode" to shortcode,
-            "Password" to password,
-            "Timestamp" to timestamp,
-            "TransactionType" to "CustomerPayBillOnline",
-            "Amount" to amount,
-            "PartyA" to phone,
-            "PartyB" to shortcode,
-            "PhoneNumber" to phone,
-            "CallBackURL" to callbackUrl,
-            "AccountReference" to accountRef,
-            "TransactionDesc" to "Rentana Subscription"
-        )
-
-        println("🔥 CALLBACK URL: $callbackUrl")
-        println("📤 STK PAYLOAD: $payload")
-
-        val request = HttpEntity(payload, headers)
-
-        val response = restTemplate.postForEntity(
-            "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
-            request,
-            Map::class.java
-        )
-
-        val body = response.body ?: throw RuntimeException("No response")
-
-        val checkoutId = body["CheckoutRequestID"].toString()
-        val merchantId = body["MerchantRequestID"]?.toString()
-
-        // ✅ SAVE STK REQUEST
-        stkRequestRepository.save(
-            StkRequest(
-                checkoutRequestId = checkoutId,
-                merchantRequestId = merchantId,
-                landlordId = landlordId,
-                phoneNumber = phone,
-                amount = amount,
-                status = "PENDING"
+            val password = Base64.getEncoder().encodeToString(
+                (shortcode + passkey + timestamp).toByteArray()
             )
-        )
 
-        println("✅ STK SAVED → $checkoutId")
+            val accountRef = "SUB_${landlordId.toString().take(6)}"
 
-        return body
+            val headers = HttpHeaders()
+            headers.contentType = MediaType.APPLICATION_JSON
+            headers.setBearerAuth(token)
+
+            val payload = mapOf(
+                "BusinessShortCode" to shortcode,
+                "Password" to password,
+                "Timestamp" to timestamp,
+                "TransactionType" to "CustomerPayBillOnline",
+                "Amount" to amount.toInt(), // 🔥 FIXED
+                "PartyA" to formattedPhone,
+                "PartyB" to shortcode,
+                "PhoneNumber" to formattedPhone,
+                "CallBackURL" to callbackUrl,
+                "AccountReference" to accountRef,
+                "TransactionDesc" to "Rentana Subscription"
+            )
+
+            println("🔥 CALLBACK URL: $callbackUrl")
+            println("📤 STK PAYLOAD: $payload")
+
+            val request = HttpEntity(payload, headers)
+
+            val response = restTemplate.postForEntity(
+                "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
+                request,
+                Map::class.java
+            )
+
+            val body = response.body ?: throw RuntimeException("No response from Safaricom")
+
+            val checkoutId = body["CheckoutRequestID"]?.toString()
+                ?: throw RuntimeException("Missing CheckoutRequestID")
+
+            val merchantId = body["MerchantRequestID"]?.toString()
+
+            // =====================================================
+            // ✅ SAVE STK REQUEST
+            // =====================================================
+            stkRequestRepository.save(
+                StkRequest(
+                    checkoutRequestId = checkoutId,
+                    merchantRequestId = merchantId,
+                    landlordId = landlordId,
+                    phoneNumber = formattedPhone,
+                    amount = amount,
+                    status = "PENDING"
+                )
+            )
+
+            println("✅ STK SAVED → $checkoutId")
+
+            return body
+
+        } catch (e: Exception) {
+            println("❌ STK ERROR: ${e.message}")
+            throw e
+        }
     }
 }
