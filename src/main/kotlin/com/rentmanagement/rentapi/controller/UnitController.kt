@@ -23,7 +23,7 @@ class UnitController(
 ) {
 
     // =====================================================
-    // CREATE UNIT
+    // 🔥 CREATE UNIT (FIXED — NO DASHES)
     // =====================================================
 
     @PostMapping
@@ -34,33 +34,36 @@ class UnitController(
         val property = propertyRepository.findById(UUID.fromString(request.propertyId))
             .orElseThrow { RuntimeException("Property not found") }
 
-        val accountNumber = "${property.accountPrefix}-${request.unitNumber}"
-        val referenceNumber = "${property.accountPrefix}-${request.unitNumber}"
+        // 🔥 CLEAN UNIT NUMBER (digits only)
+        val cleanUnitNumber = request.unitNumber.filter { it.isLetterOrDigit() }
 
-        if (unitRepository.existsByAccountNumber(accountNumber)) {
+        // 🔥 FINAL ACCOUNT → K2 (NO DASH)
+        val referenceNumber = "${property.accountPrefix}$cleanUnitNumber"
+
+        if (unitRepository.existsByAccountNumber(referenceNumber)) {
             throw RuntimeException("Unit already exists")
         }
 
         val unit = Unit(
             unitNumber = request.unitNumber,
-            accountNumber = accountNumber,
-            referenceNumber = referenceNumber,
+            accountNumber = referenceNumber,   // ✅ SAME
+            referenceNumber = referenceNumber, // ✅ SAME
             rentAmount = request.rentAmount,
             property = property
         )
 
         val saved = unitRepository.save(unit)
 
-        val response = UnitDetailsResponse(
-            id = saved.id!!,
-            unitNumber = saved.unitNumber,
-            rentAmount = saved.rentAmount,
-            accountNumber = saved.accountNumber,
-            referenceNumber = saved.referenceNumber,
-            isActive = saved.isActive
+        return ResponseEntity.ok(
+            UnitDetailsResponse(
+                id = saved.id!!,
+                unitNumber = saved.unitNumber,
+                rentAmount = saved.rentAmount,
+                accountNumber = saved.referenceNumber, // 🔥 FORCE CLEAN
+                referenceNumber = saved.referenceNumber,
+                isActive = saved.isActive
+            )
         )
-
-        return ResponseEntity.ok(response)
     }
 
     // =====================================================
@@ -82,7 +85,7 @@ class UnitController(
                 id = unit.id!!,
                 unitNumber = unit.unitNumber,
                 rentAmount = unit.rentAmount,
-                accountNumber = unit.accountNumber,
+                accountNumber = unit.referenceNumber, // 🔥 ALWAYS CLEAN
                 tenantName = activeTenancy?.tenant?.fullName,
                 isOccupied = activeTenancy != null
             )
@@ -106,23 +109,21 @@ class UnitController(
         val activeTenancy =
             tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
 
-        val response = UnitDetailsResponse(
-            id = unit.id!!,
-            unitNumber = unit.unitNumber,
-            rentAmount = unit.rentAmount,
-            accountNumber = unit.accountNumber,
-            referenceNumber = unit.referenceNumber,
-            isActive = unit.isActive,
-            tenantName = activeTenancy?.tenant?.fullName,
-            tenantPhone = activeTenancy?.tenant?.phoneNumber,
-            isOccupied = activeTenancy != null,
-
-            // NEW
-            tenancyId = activeTenancy?.id,
-            tenancyActive = activeTenancy?.isActive
+        return ResponseEntity.ok(
+            UnitDetailsResponse(
+                id = unit.id!!,
+                unitNumber = unit.unitNumber,
+                rentAmount = unit.rentAmount,
+                accountNumber = unit.referenceNumber, // 🔥 FORCE CLEAN
+                referenceNumber = unit.referenceNumber,
+                isActive = unit.isActive,
+                tenantName = activeTenancy?.tenant?.fullName,
+                tenantPhone = activeTenancy?.tenant?.phoneNumber,
+                isOccupied = activeTenancy != null,
+                tenancyId = activeTenancy?.id,
+                tenancyActive = activeTenancy?.isActive
+            )
         )
-
-        return ResponseEntity.ok(response)
     }
 
     // =====================================================
@@ -143,22 +144,20 @@ class UnitController(
         val activeTenancy =
             tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
 
-        val response = UnitDetailsResponse(
-            id = unit.id!!,
-            unitNumber = unit.unitNumber,
-            rentAmount = unit.rentAmount,
-            accountNumber = unit.accountNumber,
-            referenceNumber = unit.referenceNumber,
-            isActive = unit.isActive,
-            tenantName = activeTenancy?.tenant?.fullName,
-            tenantPhone = activeTenancy?.tenant?.phoneNumber,
-            isOccupied = activeTenancy != null,
-
-            // NEW
-            tenancyId = activeTenancy?.id,
-            tenancyActive = activeTenancy?.isActive
+        return ResponseEntity.ok(
+            UnitDetailsResponse(
+                id = unit.id!!,
+                unitNumber = unit.unitNumber,
+                rentAmount = unit.rentAmount,
+                accountNumber = unit.referenceNumber, // 🔥 FORCE CLEAN
+                referenceNumber = unit.referenceNumber,
+                isActive = unit.isActive,
+                tenantName = activeTenancy?.tenant?.fullName,
+                tenantPhone = activeTenancy?.tenant?.phoneNumber,
+                isOccupied = activeTenancy != null,
+                tenancyId = activeTenancy?.id,
+                tenancyActive = activeTenancy?.isActive
+            )
         )
-
-        return ResponseEntity.ok(response)
     }
 }
