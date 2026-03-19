@@ -18,6 +18,7 @@ class MpesaService(
     private val subscriptionRepository: SubscriptionRepository,
     private val subscriptionPlanRepository: SubscriptionPlanRepository,
     private val platformTransactionRepository: PlatformTransactionRepository,
+    private val stkRequestRepository: StkRequestRepository, // ✅ NEW
     private val jdbcTemplate: JdbcTemplate
 ) {
 
@@ -123,13 +124,12 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🟢 SUBSCRIPTIONS (FINAL DEBUGGED VERSION)
+    // 🟢 SUBSCRIPTIONS (🔥 FINAL FIX WITH STK TABLE)
     // =========================================================
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
         try {
 
-            // 🔥 FULL CALLBACK LOG
             log.info("🔥 SUBSCRIPTION CALLBACK FULL: $payload")
 
             val callback = payload["Body"]
@@ -139,9 +139,21 @@ class MpesaService(
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
             val resultDesc = callback["ResultDesc"]?.toString()
 
+            val checkoutId = callback["CheckoutRequestID"]?.toString()
+
             // ❌ FAILED PAYMENT
             if (resultCode != 0) {
+
                 log.warn("❌ Subscription failed → code=$resultCode desc=$resultDesc")
+
+                // update status if exists
+                if (checkoutId != null) {
+                    stkRequestRepository.findByCheckoutRequestId(checkoutId)?.let {
+                        it.status = "FAILED"
+                        stkRequestRepository.save(it)
+                    }
+                }
+
                 return
             }
 
@@ -151,40 +163,37 @@ class MpesaService(
 
             var amount: BigDecimal? = null
             var reference: String? = null
-            var account: String? = null
 
             for (item in items) {
                 when (item["Name"]) {
                     "Amount" -> amount = BigDecimal((item["Value"] as Number).toString())
                     "MpesaReceiptNumber" -> reference = item["Value"].toString()
-                    "AccountReference" -> account = item["Value"].toString()
                 }
             }
 
             val safeAmount = amount ?: return
             val safeReference = reference ?: return
-            val safeAccount = account ?: return
+            val safeCheckoutId = checkoutId ?: return
 
-            log.info("💸 SUBSCRIPTION SUCCESS → amount=$safeAmount account=$safeAccount")
+            log.info("💸 SUBSCRIPTION SUCCESS → checkoutId=$safeCheckoutId amount=$safeAmount")
 
-            // 🔥 Extract landlordId
-            val landlordId = safeAccount.removePrefix("SUB_")
+            // 🔥 GET STK REQUEST
+            val stkRequest = stkRequestRepository.findByCheckoutRequestId(safeCheckoutId)
+                ?: throw RuntimeException("❌ STK request not found")
 
-            val landlord = userRepository.findById(UUID.fromString(landlordId))
-                .orElseThrow {
-                    RuntimeException("❌ Landlord not found for id=$landlordId")
-                }
+            val landlord = userRepository.findById(stkRequest.landlordId)
+                .orElseThrow { RuntimeException("❌ Landlord not found") }
 
-            // 🛑 Duplicate check
+            // 🛑 DUPLICATE CHECK
             if (platformTransactionRepository.existsByReference(safeReference)) {
                 log.warn("⚠️ Duplicate subscription ignored")
                 return
             }
 
             val plan = subscriptionPlanRepository.findMatchingPlan(safeAmount)
-                ?: throw RuntimeException("❌ Plan not found for amount=$safeAmount")
+                ?: throw RuntimeException("❌ Plan not found")
 
-            // 💰 Save transaction
+            // 💰 SAVE TRANSACTION
             platformTransactionRepository.save(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
@@ -194,19 +203,19 @@ class MpesaService(
                 )
             )
 
-            // 💰 Update wallet
+            // 💰 UPDATE WALLET
             jdbcTemplate.update(
                 "UPDATE platform_wallet SET balance = balance + ?",
                 safeAmount
             )
 
-            // 🔄 Expire old subscriptions
+            // 🔄 EXPIRE OLD
             jdbcTemplate.update(
                 "UPDATE subscriptions SET status = 'EXPIRED' WHERE landlord_id = ?",
                 landlord.id
             )
 
-            // ✅ New subscription
+            // ✅ CREATE NEW SUBSCRIPTION
             val start = LocalDateTime.now()
 
             subscriptionRepository.save(
@@ -219,6 +228,10 @@ class MpesaService(
                     status = "ACTIVE"
                 )
             )
+
+            // ✅ UPDATE STK STATUS
+            stkRequest.status = "SUCCESS"
+            stkRequestRepository.save(stkRequest)
 
             log.info("🎉 SUBSCRIPTION ACTIVATED SUCCESSFULLY")
 

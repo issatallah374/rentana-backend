@@ -1,5 +1,7 @@
 package com.rentmanagement.rentapi.services
 
+import com.rentmanagement.rentapi.models.StkRequest
+import com.rentmanagement.rentapi.repository.StkRequestRepository
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.*
 import org.springframework.stereotype.Service
@@ -11,7 +13,8 @@ import java.util.Base64
 
 @Service
 class MpesaStkService(
-    private val restTemplate: RestTemplate
+    private val restTemplate: RestTemplate,
+    private val stkRequestRepository: StkRequestRepository // ✅ NEW
 ) {
 
     @Value("\${mpesa.consumerKey}")
@@ -29,9 +32,7 @@ class MpesaStkService(
     @Value("\${mpesa.callbackUrl}")
     lateinit var callbackUrl: String
 
-    // =========================
     // 🔐 ACCESS TOKEN
-    // =========================
     private fun getAccessToken(): String {
 
         val credentials = "$consumerKey:$consumerSecret"
@@ -49,15 +50,13 @@ class MpesaStkService(
             Map::class.java
         )
 
-        val body = response.body ?: throw RuntimeException("❌ No token response")
+        val body = response.body ?: throw RuntimeException("No token response")
 
         return body["access_token"]?.toString()
-            ?: throw RuntimeException("❌ Access token missing")
+            ?: throw RuntimeException("Access token missing")
     }
 
-    // =========================
     // 📲 STK PUSH
-    // =========================
     fun stkPush(
         phone: String,
         amount: BigDecimal,
@@ -100,11 +99,28 @@ class MpesaStkService(
         val response = restTemplate.postForEntity(
             "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
             request,
-            Any::class.java
+            Map::class.java
         )
 
-        println("📥 SAFARICOM RESPONSE: ${response.body}")
+        val body = response.body ?: throw RuntimeException("No response")
 
-        return response.body ?: "No response from Safaricom"
+        val checkoutId = body["CheckoutRequestID"].toString()
+        val merchantId = body["MerchantRequestID"]?.toString()
+
+        // ✅ SAVE STK REQUEST
+        stkRequestRepository.save(
+            StkRequest(
+                checkoutRequestId = checkoutId,
+                merchantRequestId = merchantId,
+                landlordId = landlordId,
+                phoneNumber = phone,
+                amount = amount,
+                status = "PENDING"
+            )
+        )
+
+        println("✅ STK SAVED → $checkoutId")
+
+        return body
     }
 }
