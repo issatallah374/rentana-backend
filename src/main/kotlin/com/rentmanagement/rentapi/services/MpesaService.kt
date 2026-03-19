@@ -46,48 +46,70 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🔵 RENT PAYMENTS (🔥 NORMALIZED)
-    // =========================================================
+// 🔵 RENT PAYMENTS (🔥 NORMALIZED + FULL DEBUG)
+// =========================================================
     fun processPaymentCallback(payload: Map<String, Any>) {
 
         try {
 
+            log.info("🔥 ===== M-PESA RENT CALLBACK START =====")
+            log.info("📦 Payload: $payload")
+
             val callback = payload["Body"]
                 ?.let { it as? Map<*, *> }
-                ?.get("stkCallback") as? Map<*, *> ?: return
+                ?.get("stkCallback") as? Map<*, *>
+
+            if (callback == null) {
+                log.error("❌ stkCallback missing")
+                return
+            }
 
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
-            if (resultCode != 0) return
+            val resultDesc = callback["ResultDesc"]?.toString()
+
+            log.info("📊 Result → code=$resultCode desc=$resultDesc")
+
+            if (resultCode != 0) {
+                log.warn("❌ Payment failed at Safaricom level")
+                return
+            }
 
             val items = callback["CallbackMetadata"]
                 ?.let { it as? Map<*, *> }
-                ?.get("Item") as? List<Map<String, Any>> ?: return
+                ?.get("Item") as? List<Map<String, Any>>
+
+            if (items == null) {
+                log.error("❌ CallbackMetadata missing")
+                return
+            }
 
             var amount: BigDecimal? = null
             var reference: String? = null
             var phone: String? = null
-            var account: String? = null
+            var accountRaw: String? = null
 
             for (item in items) {
                 when (item["Name"]) {
                     "Amount" -> amount = BigDecimal((item["Value"] as Number).toString())
                     "MpesaReceiptNumber" -> reference = item["Value"].toString()
                     "PhoneNumber" -> phone = item["Value"].toString()
-                    "AccountReference" -> account = item["Value"].toString()
+                    "AccountReference" -> accountRaw = item["Value"].toString()
                 }
             }
 
-            val safeAmount = amount ?: return
-            val safeReference = reference ?: return
-            val safeAccountRaw = account ?: return
+            log.info("💰 Extracted → amount=$amount ref=$reference phone=$phone accountRaw=$accountRaw")
 
-            // 🔥 NORMALIZE ACCOUNT (CRITICAL FIX)
+            val safeAmount = amount ?: return log.error("❌ Missing amount")
+            val safeReference = reference ?: return log.error("❌ Missing receipt")
+            val safeAccountRaw = accountRaw ?: return log.error("❌ Missing account")
+
+            // 🔥 NORMALIZE ACCOUNT
             val safeAccount = safeAccountRaw
                 .uppercase()
                 .replace("\\s".toRegex(), "")
                 .replace("-", "")
 
-            log.info("💰 PAYMENT → ref=$safeReference account=$safeAccount")
+            log.info("🔄 Normalized account → $safeAccount")
 
             // 🛑 DUPLICATE CHECK
             val exists = jdbcTemplate.queryForObject(
@@ -96,29 +118,46 @@ class MpesaService(
                 safeReference
             ) ?: 0
 
+            log.info("🔍 Duplicate check → count=$exists")
+
             if (exists > 0) {
-                log.warn("⚠️ Duplicate transaction ignored")
+                log.warn("⚠️ Duplicate transaction → $safeReference ignored")
                 return
             }
 
-            // 💾 SAVE RAW PAYMENT
+            // 💾 SAVE PAYMENT RAW
             jdbcTemplate.update(
                 """
-                INSERT INTO mpesa_transactions(transaction_code, phone_number, account_reference, amount)
-                VALUES (?, ?, ?, ?)
-                """,
+            INSERT INTO mpesa_transactions(transaction_code, phone_number, account_reference, amount)
+            VALUES (?, ?, ?, ?)
+            """,
                 safeReference,
                 phone,
                 safeAccount,
                 safeAmount
             )
 
-            // 🔍 FIND UNIT USING NORMALIZED VALUE
-            val unit = unitRepository.findByReferenceNumberIgnoreCase(safeAccount)
-                ?: return log.warn("❌ Unit not found for $safeAccount")
+            log.info("💾 Saved to mpesa_transactions")
 
+            // 🔍 FIND UNIT
+            val unit = unitRepository.findByReferenceNumberIgnoreCase(safeAccount)
+
+            if (unit == null) {
+                log.error("❌ UNIT NOT FOUND → account=$safeAccount")
+                return
+            }
+
+            log.info("🏠 Unit found → id=${unit.id}, ref=${unit.referenceNumber}")
+
+            // 🔍 FIND TENANCY
             val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
-                ?: return log.warn("❌ No active tenancy")
+
+            if (tenancy == null) {
+                log.error("❌ NO ACTIVE TENANCY → unit=${unit.id}")
+                return
+            }
+
+            log.info("👤 Tenancy found → id=${tenancy.id}")
 
             // 💰 PROCESS PAYMENT
             jdbcTemplate.execute(
@@ -130,10 +169,12 @@ class MpesaService(
                 ps.execute()
             }
 
-            log.info("✅ RENT processed successfully")
+            log.info("🎉 PAYMENT APPLIED SUCCESSFULLY")
+
+            log.info("🔥 ===== M-PESA RENT CALLBACK END =====")
 
         } catch (e: Exception) {
-            log.error("❌ Rent callback failed", e)
+            log.error("❌ CALLBACK CRASHED", e)
         }
     }
 
