@@ -10,6 +10,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.security.crypto.password.PasswordEncoder
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 
 @RestController
 @RequestMapping("/api/auth")
@@ -55,7 +56,7 @@ class AuthController(
         val user = User(
             fullName = request.fullName,
             email = request.email,
-            phone = normalizedPhone, // 🔥 IMPORTANT
+            phone = normalizedPhone,
             passwordHash = passwordEncoder.encode(request.password),
             role = request.role,
             isActive = true
@@ -110,5 +111,13 @@ class AuthController(
         )
 
         return AuthResponse(token)
+    }
+
+    // =========================
+    // 🔥 TEMP DEBUG HASH (REMOVE AFTER USE)
+    // =========================
+    @GetMapping("/debug/hash")
+    fun hash(@RequestParam password: String): String {
+        return BCryptPasswordEncoder().encode(password)
     }
 }
