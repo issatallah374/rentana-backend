@@ -24,15 +24,12 @@ spring:
       name: ${ADMIN_USERNAME:admin}
       password: ${ADMIN_PASSWORD:admin123}
 
-
-# 🔥 MPESA CONFIG (OUTSIDE spring)
 mpesa:
   consumerKey: ${MPESA_CONSUMER_KEY}
   consumerSecret: ${MPESA_CONSUMER_SECRET}
   shortcode: ${MPESA_SHORTCODE}
   passkey: ${MPESA_PASSKEY}
   callbackUrl: ${MPESA_CALLBACK_URL}
-
 
 server:
   port: ${PORT:10000}
