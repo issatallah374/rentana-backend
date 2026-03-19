@@ -63,7 +63,7 @@ class MpesaCallbackController(
     }
 
     // =====================================================
-    // 🟢 C2B CONFIRMATION (🔥 REAL MONEY)
+    // 🟢 C2B CONFIRMATION
     // =====================================================
     @PostMapping("/api/c2b/confirmation")
     fun c2bConfirmation(
