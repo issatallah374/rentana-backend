@@ -12,18 +12,19 @@ interface PropertyRepository : JpaRepository<Property, UUID> {
     // ===============================
     // BASIC OPERATIONS
     // ===============================
-
     fun findByLandlord(landlord: User): List<Property>
 
     fun findByAccountPrefix(accountPrefix: String): Property?
 
     fun existsByAccountPrefix(accountPrefix: String): Boolean
 
+    // 🔥 ADD THIS
+    fun countByLandlord(landlord: User): Int
+
 
     // ===============================
     // DASHBOARD / REPORTING
     // ===============================
-
     @Query(
         value = """
             SELECT 

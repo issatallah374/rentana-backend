@@ -2,14 +2,15 @@ package com.rentmanagement.rentapi.controllers
 
 import com.rentmanagement.rentapi.models.Property
 import com.rentmanagement.rentapi.models.PropertyRequest
-import com.rentmanagement.rentapi.repository.PropertyRepository
-import com.rentmanagement.rentapi.repository.UserRepository
+import com.rentmanagement.rentapi.repository.*
 import com.rentmanagement.rentapi.util.PrefixGenerator
 import com.rentmanagement.rentapi.dto.PropertySummaryResponse
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.http.ResponseEntity
+import org.springframework.http.HttpStatus
+import org.springframework.web.server.ResponseStatusException
 import java.util.UUID
 
 @RestController
@@ -18,7 +19,11 @@ class PropertyController(
     private val propertyRepository: PropertyRepository,
     private val userRepository: UserRepository,
     private val prefixGenerator: PrefixGenerator,
-    private val jdbcTemplate: JdbcTemplate
+    private val jdbcTemplate: JdbcTemplate,
+
+    // 🔥 ADD THESE
+    private val subscriptionRepository: SubscriptionRepository,
+    private val subscriptionPlanRepository: SubscriptionPlanRepository
 ) {
 
     // ==============================
@@ -39,7 +44,7 @@ class PropertyController(
 
 
     // ==============================
-    // CREATE PROPERTY
+    // CREATE PROPERTY (🔥 PROTECTED)
     // ==============================
     @PostMapping
     fun createProperty(
@@ -52,6 +57,39 @@ class PropertyController(
         val user = userRepository.findById(userId)
             .orElseThrow { RuntimeException("User not found") }
 
+        // =====================================
+        // 🔒 CHECK ACTIVE SUBSCRIPTION
+        // =====================================
+        val subscription = subscriptionRepository
+            .findTopByLandlordIdOrderByCreatedAtDesc(userId)
+
+        if (subscription == null || subscription.status != "ACTIVE") {
+            throw ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                "❌ Active subscription required"
+            )
+        }
+
+        // =====================================
+        // 🏢 CHECK PROPERTY LIMIT
+        // =====================================
+        val plan = subscriptionPlanRepository.findById(subscription.planId)
+            .orElseThrow {
+                ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Plan not found")
+            }
+
+        val propertyCount = propertyRepository.countByLandlord(user)
+
+        if (propertyCount >= plan.propertyLimit) {
+            throw ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                "❌ Property limit reached (${plan.propertyLimit})"
+            )
+        }
+
+        // =====================================
+        // ✅ CREATE PROPERTY
+        // =====================================
         val prefix = prefixGenerator.generatePrefix(request.name)
 
         val property = Property(
@@ -98,7 +136,6 @@ class PropertyController(
             propertyId
         )
 
-        // If no summary row exists return zeros
         if (result.isEmpty()) {
             return ResponseEntity.ok(
                 PropertySummaryResponse(
@@ -113,7 +150,6 @@ class PropertyController(
 
         val row = result[0]
 
-        // ✅ NULL SAFE VALUES
         val response = PropertySummaryResponse(
             propertyId = row["property_id"].toString(),
             unitCount = (row["unit_count"] as? Number)?.toInt() ?: 0,
