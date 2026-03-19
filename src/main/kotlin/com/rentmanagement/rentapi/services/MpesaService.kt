@@ -2,7 +2,6 @@ package com.rentmanagement.rentapi.services
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.rentmanagement.rentapi.models.PlatformTransaction
-import com.rentmanagement.rentapi.models.Subscription
 import com.rentmanagement.rentapi.repository.*
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
@@ -21,14 +20,14 @@ class MpesaService(
     private val platformTransactionRepository: PlatformTransactionRepository,
     private val stkRequestRepository: StkRequestRepository,
     private val jdbcTemplate: JdbcTemplate,
-    private val mpesaStkService: MpesaStkService // ✅ USE THIS ONLY
+    private val mpesaStkService: MpesaStkService
 ) {
 
     private val log = LoggerFactory.getLogger(MpesaService::class.java)
     private val objectMapper = ObjectMapper()
 
     // =========================================================
-    // 🔥 STK INIT (CALL REAL SERVICE)
+    // 🔥 STK INIT
     // =========================================================
     fun initiateStkPush(phone: String, amount: Double, landlordId: String) {
 
@@ -122,7 +121,7 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🟢 SUBSCRIPTION CALLBACK
+    // 🟢 SUBSCRIPTION CALLBACK (🔥 FIXED)
     // =========================================================
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
@@ -135,6 +134,7 @@ class MpesaService(
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
             val checkoutId = callback["CheckoutRequestID"]?.toString()
 
+            // ❌ FAILED PAYMENT
             if (resultCode != 0) {
 
                 checkoutId?.let {
@@ -170,11 +170,13 @@ class MpesaService(
 
             val landlord = userRepository.findById(stkRequest.landlordId).orElseThrow()
 
+            // 🛑 DUPLICATE CHECK
             if (platformTransactionRepository.existsByReference(safeReference)) return
 
             val plan = subscriptionPlanRepository.findMatchingPlan(safeAmount)
                 ?: throw RuntimeException("Plan not found")
 
+            // 💰 SAVE TRANSACTION
             platformTransactionRepository.save(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
@@ -184,29 +186,42 @@ class MpesaService(
                 )
             )
 
+            // 💰 UPDATE WALLET
             jdbcTemplate.update(
                 "UPDATE platform_wallet SET balance = balance + ?",
                 safeAmount
             )
 
+            // 🔥 EXPIRE ONLY ACTIVE (FIXED)
             jdbcTemplate.update(
-                "UPDATE subscriptions SET status = 'EXPIRED' WHERE landlord_id = ?",
+                "UPDATE subscriptions SET status = 'EXPIRED' WHERE landlord_id = ? AND status = 'ACTIVE'",
                 landlord.id
             )
 
             val start = LocalDateTime.now()
+            val end = start.plusMonths(1)
 
-            subscriptionRepository.save(
-                Subscription(
-                    id = UUID.randomUUID(),
-                    landlordId = landlord.id!!,
-                    planId = plan.id!!,
-                    startDate = start,
-                    endDate = start.plusMonths(1),
-                    status = "ACTIVE"
+            // 🔥 SAFE INSERT (NO JPA)
+            jdbcTemplate.update(
+                """
+                INSERT INTO subscriptions (
+                    id,
+                    landlord_id,
+                    plan_id,
+                    start_date,
+                    end_date,
+                    status
                 )
+                VALUES (?, ?, ?, ?, ?, 'ACTIVE')
+                """,
+                UUID.randomUUID(),
+                landlord.id,
+                plan.id,
+                start,
+                end
             )
 
+            // ✅ UPDATE STK STATUS
             stkRequest.status = "SUCCESS"
             stkRequestRepository.save(stkRequest)
 
