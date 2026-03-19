@@ -25,18 +25,22 @@ class MpesaService(
     private val objectMapper = ObjectMapper()
 
     // =========================================================
-    // 🔵 TENANT RENT PAYMENTS (UNCHANGED)
+    // 🔵 TENANT RENT PAYMENTS
     // =========================================================
     fun processPaymentCallback(payload: Map<String, Any>) {
 
         try {
+            log.info("🔥 RENT CALLBACK: $payload")
+
             val callback = payload["Body"]
                 ?.let { it as? Map<*, *> }
                 ?.get("stkCallback") as? Map<*, *> ?: return
 
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
+            val resultDesc = callback["ResultDesc"]?.toString()
+
             if (resultCode != 0) {
-                log.warn("❌ Payment failed or cancelled")
+                log.warn("❌ Payment failed → code=$resultCode desc=$resultDesc")
                 return
             }
 
@@ -119,18 +123,25 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🟢 SUBSCRIPTIONS (🔥 FIXED PRODUCTION LOGIC)
+    // 🟢 SUBSCRIPTIONS (FINAL DEBUGGED VERSION)
     // =========================================================
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
         try {
+
+            // 🔥 FULL CALLBACK LOG
+            log.info("🔥 SUBSCRIPTION CALLBACK FULL: $payload")
+
             val callback = payload["Body"]
                 ?.let { it as? Map<*, *> }
                 ?.get("stkCallback") as? Map<*, *> ?: return
 
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
+            val resultDesc = callback["ResultDesc"]?.toString()
+
+            // ❌ FAILED PAYMENT
             if (resultCode != 0) {
-                log.warn("❌ Subscription failed")
+                log.warn("❌ Subscription failed → code=$resultCode desc=$resultDesc")
                 return
             }
 
@@ -154,24 +165,26 @@ class MpesaService(
             val safeReference = reference ?: return
             val safeAccount = account ?: return
 
-            log.info("💸 SUBSCRIPTION → amount=$safeAmount account=$safeAccount")
+            log.info("💸 SUBSCRIPTION SUCCESS → amount=$safeAmount account=$safeAccount")
 
-            // 🔥 EXTRACT LANDLORD ID FROM ACCOUNT REFERENCE
+            // 🔥 Extract landlordId
             val landlordId = safeAccount.removePrefix("SUB_")
 
             val landlord = userRepository.findById(UUID.fromString(landlordId))
-                .orElseThrow { RuntimeException("Landlord not found") }
+                .orElseThrow {
+                    RuntimeException("❌ Landlord not found for id=$landlordId")
+                }
 
-            // 🛑 Prevent duplicate transactions
+            // 🛑 Duplicate check
             if (platformTransactionRepository.existsByReference(safeReference)) {
                 log.warn("⚠️ Duplicate subscription ignored")
                 return
             }
 
             val plan = subscriptionPlanRepository.findMatchingPlan(safeAmount)
-                ?: throw RuntimeException("Plan not found")
+                ?: throw RuntimeException("❌ Plan not found for amount=$safeAmount")
 
-            // 💰 Save platform revenue
+            // 💰 Save transaction
             platformTransactionRepository.save(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
@@ -181,7 +194,7 @@ class MpesaService(
                 )
             )
 
-            // 💰 Update platform wallet
+            // 💰 Update wallet
             jdbcTemplate.update(
                 "UPDATE platform_wallet SET balance = balance + ?",
                 safeAmount
@@ -193,7 +206,7 @@ class MpesaService(
                 landlord.id
             )
 
-            // ✅ Create new subscription
+            // ✅ New subscription
             val start = LocalDateTime.now()
 
             subscriptionRepository.save(
@@ -207,10 +220,10 @@ class MpesaService(
                 )
             )
 
-            log.info("✅ Subscription activated successfully")
+            log.info("🎉 SUBSCRIPTION ACTIVATED SUCCESSFULLY")
 
         } catch (e: Exception) {
-            log.error("❌ Subscription callback failed", e)
+            log.error("❌ Subscription callback crashed", e)
         }
     }
 }

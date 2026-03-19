@@ -29,7 +29,9 @@ class MpesaStkService(
     @Value("\${mpesa.callbackUrl}")
     lateinit var callbackUrl: String
 
+    // =========================
     // 🔐 ACCESS TOKEN
+    // =========================
     private fun getAccessToken(): String {
 
         val credentials = "$consumerKey:$consumerSecret"
@@ -47,17 +49,19 @@ class MpesaStkService(
             Map::class.java
         )
 
-        val body = response.body ?: throw RuntimeException("No token response")
+        val body = response.body ?: throw RuntimeException("❌ No token response")
 
         return body["access_token"]?.toString()
-            ?: throw RuntimeException("Access token missing")
+            ?: throw RuntimeException("❌ Access token missing")
     }
 
+    // =========================
     // 📲 STK PUSH
+    // =========================
     fun stkPush(
         phone: String,
         amount: BigDecimal,
-        landlordId: UUID // ✅ CHANGE
+        landlordId: UUID
     ): Any {
 
         val token = getAccessToken()
@@ -68,7 +72,7 @@ class MpesaStkService(
             (shortcode + passkey + timestamp).toByteArray()
         )
 
-        val accountRef = "SUB_$landlordId" // 🔥 CORE FIX
+        val accountRef = "SUB_$landlordId"
 
         val headers = HttpHeaders()
         headers.contentType = MediaType.APPLICATION_JSON
@@ -84,7 +88,7 @@ class MpesaStkService(
             "PartyB" to shortcode,
             "PhoneNumber" to phone,
             "CallBackURL" to callbackUrl,
-            "AccountReference" to accountRef, // 🔥 IMPORTANT
+            "AccountReference" to accountRef,
             "TransactionDesc" to "Rentana Subscription"
         )
 
@@ -99,8 +103,8 @@ class MpesaStkService(
             Any::class.java
         )
 
-        println("📥 RESPONSE: ${response.body}")
+        println("📥 SAFARICOM RESPONSE: ${response.body}")
 
-        return response.body ?: "No response"
+        return response.body ?: "No response from Safaricom"
     }
 }
