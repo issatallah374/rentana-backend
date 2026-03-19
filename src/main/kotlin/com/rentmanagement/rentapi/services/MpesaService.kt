@@ -46,14 +46,13 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🔵 RENT PAYMENTS (🔥 FINAL CLEAN VERSION)
+    // 🔵 STK CALLBACK (APP PAYMENTS)
     // =========================================================
     fun processPaymentCallback(payload: Map<String, Any>) {
 
         try {
 
-            log.info("🔥 ===== M-PESA RENT CALLBACK START =====")
-            log.info("📦 Payload: $payload")
+            log.info("🔥 ===== STK CALLBACK START =====")
 
             val callback = payload["Body"]
                 ?.let { it as? Map<*, *> }
@@ -61,12 +60,8 @@ class MpesaService(
                 ?: return log.error("❌ Missing stkCallback")
 
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
-            val resultDesc = callback["ResultDesc"]?.toString()
-
-            log.info("📊 Result → code=$resultCode desc=$resultDesc")
-
             if (resultCode != 0) {
-                log.warn("❌ Payment failed at Safaricom level")
+                log.warn("❌ STK Payment failed")
                 return
             }
 
@@ -89,10 +84,8 @@ class MpesaService(
                 }
             }
 
-            log.info("💰 Extracted → amount=$amount ref=$reference phone=$phone accountRaw=$accountRaw")
-
             val safeAmount = amount ?: return log.error("❌ Missing amount")
-            val safeReference = reference ?: return log.error("❌ Missing receipt")
+            val safeReference = reference ?: return log.error("❌ Missing reference")
 
             val safeAccount = accountRaw
                 ?.uppercase()
@@ -100,82 +93,122 @@ class MpesaService(
                 ?.replace("-", "")
                 ?: return log.error("❌ Missing account")
 
-            log.info("🔄 Normalized account → $safeAccount")
+            log.info("💰 STK → $safeAmount | $safeAccount | $safeReference")
 
-            // =====================================================
+            handlePayment(safeReference, safeAmount, phone, safeAccount, payload)
+
+        } catch (e: Exception) {
+            log.error("❌ STK CALLBACK FAILED", e)
+        }
+    }
+
+    // =========================================================
+    // 🟢 C2B PAYMENTS (PAYBILL)
+    // =========================================================
+    fun processC2BPayment(payload: Map<String, Any>) {
+
+        try {
+
+            log.info("🔥 ===== C2B PAYMENT START =====")
+            log.info("📦 Payload: $payload")
+
+            val reference = payload["TransID"]?.toString()
+                ?: return log.error("❌ Missing TransID")
+
+            val amount = payload["TransAmount"]?.toString()?.toBigDecimalOrNull()
+                ?: return log.error("❌ Missing amount")
+
+            val phone = payload["MSISDN"]?.toString()
+
+            val safeAccount = payload["BillRefNumber"]?.toString()
+                ?.uppercase()
+                ?.replace("\\s".toRegex(), "")
+                ?.replace("-", "")
+                ?: return log.error("❌ Missing account")
+
+            log.info("💰 C2B → $amount | $safeAccount | $reference")
+
+            handlePayment(reference, amount, phone, safeAccount, payload)
+
+        } catch (e: Exception) {
+            log.error("❌ C2B FAILED", e)
+        }
+    }
+
+    // =========================================================
+    // 💰 CORE HANDLER (USED BY BOTH STK + C2B)
+    // =========================================================
+    private fun handlePayment(
+        reference: String,
+        amount: BigDecimal,
+        phone: String?,
+        account: String,
+        payload: Map<String, Any>
+    ) {
+
+        try {
+
             // 🛑 DUPLICATE CHECK
-            // =====================================================
             val exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM mpesa_transactions WHERE transaction_code = ?",
                 Int::class.java,
-                safeReference
+                reference
             ) ?: 0
 
             if (exists > 0) {
-                log.warn("⚠️ Duplicate transaction ignored → $safeReference")
+                log.warn("⚠️ Duplicate ignored → $reference")
                 return
             }
 
-            // =====================================================
-            // 💾 SAVE RAW TRANSACTION
-            // =====================================================
+            // 💾 SAVE RAW
             jdbcTemplate.update(
                 """
                 INSERT INTO mpesa_transactions(transaction_code, phone_number, account_reference, amount, raw_payload, processed)
                 VALUES (?, ?, ?, ?, ?::jsonb, false)
                 """,
-                safeReference,
+                reference,
                 phone,
-                safeAccount,
-                safeAmount,
+                account,
+                amount,
                 objectMapper.writeValueAsString(payload)
             )
 
-            log.info("💾 Saved raw transaction")
+            log.info("💾 Saved transaction")
 
-            // =====================================================
-            // 🔍 FIND UNIT + TENANCY
-            // =====================================================
-            val unit = unitRepository.findByReferenceNumberIgnoreCase(safeAccount)
-                ?: return log.error("❌ UNIT NOT FOUND → $safeAccount")
+            // 🔍 FIND UNIT
+            val unit = unitRepository.findByReferenceNumberIgnoreCase(account)
+                ?: return log.error("❌ Unit not found → $account")
 
             val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
-                ?: return log.error("❌ NO ACTIVE TENANCY")
+                ?: return log.error("❌ No active tenancy")
 
             log.info("🏠 Unit=${unit.id} Tenancy=${tenancy.id}")
 
-            // =====================================================
-            // 💰 CORE PAYMENT ENGINE (ONLY THIS DOES FINANCE)
-            // =====================================================
+            // 💰 DB ENGINE
             jdbcTemplate.execute(
                 "SELECT process_payment(?::uuid, ?::numeric, ?)"
             ) { ps ->
                 ps.setObject(1, tenancy.id)
-                ps.setBigDecimal(2, safeAmount)
-                ps.setString(3, safeReference)
+                ps.setBigDecimal(2, amount)
+                ps.setString(3, reference)
                 ps.execute()
             }
 
-            log.info("🎉 process_payment() SUCCESS")
+            log.info("🎉 PAYMENT SUCCESS")
 
-            // =====================================================
-            // ✅ MARK AS PROCESSED
-            // =====================================================
+            // ✅ MARK PROCESSED
             jdbcTemplate.update(
                 "UPDATE mpesa_transactions SET processed = true WHERE transaction_code = ?",
-                safeReference
+                reference
             )
 
-            log.info("✅ Marked as processed")
-            log.info("🔥 ===== PAYMENT FLOW COMPLETE =====")
-
         } catch (e: Exception) {
-            log.error("❌ PAYMENT PIPELINE FAILED", e)
+            log.error("❌ HANDLE PAYMENT FAILED", e)
         }
     }
 
     // =========================================================
-    // 🟢 SUBSCRIPTION CALLBACK (UNCHANGED)
+    // 🟢 SUBSCRIPTION CALLBACK
     // =========================================================
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
