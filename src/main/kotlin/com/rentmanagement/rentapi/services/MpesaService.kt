@@ -30,7 +30,6 @@ class MpesaService(
     // 🔥 STK INIT
     // =========================================================
     fun initiateStkPush(phone: String, amount: Double, landlordId: String) {
-
         try {
 
             mpesaStkService.stkPush(
@@ -47,7 +46,7 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🔵 RENT PAYMENTS
+    // 🔵 RENT PAYMENTS (🔥 NORMALIZED)
     // =========================================================
     fun processPaymentCallback(payload: Map<String, Any>) {
 
@@ -80,16 +79,29 @@ class MpesaService(
 
             val safeAmount = amount ?: return
             val safeReference = reference ?: return
-            val safeAccount = account ?: return
+            val safeAccountRaw = account ?: return
 
+            // 🔥 NORMALIZE ACCOUNT (CRITICAL FIX)
+            val safeAccount = safeAccountRaw
+                .uppercase()
+                .replace("\\s".toRegex(), "")
+                .replace("-", "")
+
+            log.info("💰 PAYMENT → ref=$safeReference account=$safeAccount")
+
+            // 🛑 DUPLICATE CHECK
             val exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM mpesa_transactions WHERE transaction_code = ?",
                 Int::class.java,
                 safeReference
             ) ?: 0
 
-            if (exists > 0) return
+            if (exists > 0) {
+                log.warn("⚠️ Duplicate transaction ignored")
+                return
+            }
 
+            // 💾 SAVE RAW PAYMENT
             jdbcTemplate.update(
                 """
                 INSERT INTO mpesa_transactions(transaction_code, phone_number, account_reference, amount)
@@ -101,9 +113,14 @@ class MpesaService(
                 safeAmount
             )
 
-            val unit = unitRepository.findByReferenceNumber(safeAccount) ?: return
-            val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!) ?: return
+            // 🔍 FIND UNIT USING NORMALIZED VALUE
+            val unit = unitRepository.findByReferenceNumberIgnoreCase(safeAccount)
+                ?: return log.warn("❌ Unit not found for $safeAccount")
 
+            val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
+                ?: return log.warn("❌ No active tenancy")
+
+            // 💰 PROCESS PAYMENT
             jdbcTemplate.execute(
                 "SELECT process_payment(?::uuid, ?::numeric, ?)"
             ) { ps ->
@@ -113,7 +130,7 @@ class MpesaService(
                 ps.execute()
             }
 
-            log.info("✅ RENT processed")
+            log.info("✅ RENT processed successfully")
 
         } catch (e: Exception) {
             log.error("❌ Rent callback failed", e)
@@ -121,7 +138,7 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🟢 SUBSCRIPTION CALLBACK (🔥 FIXED)
+    // 🟢 SUBSCRIPTION CALLBACK
     // =========================================================
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
@@ -192,7 +209,7 @@ class MpesaService(
                 safeAmount
             )
 
-            // 🔥 EXPIRE ONLY ACTIVE (FIXED)
+            // 🔥 EXPIRE ONLY ACTIVE
             jdbcTemplate.update(
                 "UPDATE subscriptions SET status = 'EXPIRED' WHERE landlord_id = ? AND status = 'ACTIVE'",
                 landlord.id
@@ -201,7 +218,7 @@ class MpesaService(
             val start = LocalDateTime.now()
             val end = start.plusMonths(1)
 
-            // 🔥 SAFE INSERT (NO JPA)
+            // 🔥 SAFE INSERT
             jdbcTemplate.update(
                 """
                 INSERT INTO subscriptions (

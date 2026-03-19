@@ -2,7 +2,6 @@ package com.rentmanagement.rentapi.util
 
 import com.rentmanagement.rentapi.repository.PropertyRepository
 import org.springframework.stereotype.Component
-import java.util.Locale
 
 @Component
 class PrefixGenerator(
@@ -17,8 +16,8 @@ class PrefixGenerator(
             .filter { it.isNotBlank() }
             .map { it.first().uppercaseChar() }
             .joinToString("")
-            .take(3)
-            .ifBlank { "PRP" }
+            .take(2) // 🔥 LIMIT TO 2 LETTERS → MA instead of MAK
+            .ifBlank { "PR" }
 
         var prefix = base
         var counter = 1

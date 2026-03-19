@@ -2,23 +2,21 @@ package com.rentmanagement.rentapi.utils
 
 object ReferenceGenerator {
 
-    fun generatePropertyPrefix(propertyName: String): String {
-        return propertyName
-            .trim()
-            .split(" ")
-            .filter { it.isNotBlank() }
-            .take(2)
-            .map { it.first().uppercaseChar() }
-            .joinToString("")
-            .ifBlank { "PR" }
-    }
-
     fun generateUnitReference(prefix: String, unitNumber: String): String {
 
+        // 🔥 Remove everything except digits
         val digits = unitNumber.filter { it.isDigit() }
 
-        val safeNumber = if (digits.isBlank()) "001" else digits.padStart(3, '0')
+        // 🔥 No padding → 3 stays 3 (not 003)
+        val safeNumber = if (digits.isBlank()) "1" else digits
 
-        return "$prefix$safeNumber"
+        // 🔥 Normalize prefix (extra safety)
+        val cleanPrefix = prefix
+            .uppercase()
+            .replace("\\s".toRegex(), "")
+            .replace("-", "")
+
+        // ✅ FINAL RESULT → MA3
+        return "$cleanPrefix$safeNumber"
     }
 }
