@@ -18,12 +18,51 @@ class MpesaService(
     private val subscriptionRepository: SubscriptionRepository,
     private val subscriptionPlanRepository: SubscriptionPlanRepository,
     private val platformTransactionRepository: PlatformTransactionRepository,
-    private val stkRequestRepository: StkRequestRepository, // ✅ NEW
+    private val stkRequestRepository: StkRequestRepository,
     private val jdbcTemplate: JdbcTemplate
 ) {
 
     private val log = LoggerFactory.getLogger(MpesaService::class.java)
     private val objectMapper = ObjectMapper()
+
+    // =========================================================
+    // 🔥 STK INIT (ANDROID → BACKEND → DARAKA)
+    // =========================================================
+    fun initiateStkPush(phone: String, amount: Double, landlordId: String) {
+
+        try {
+
+            log.info("🚀 INIT STK → phone=$phone amount=$amount landlord=$landlordId")
+
+            val formattedPhone = when {
+                phone.startsWith("0") -> "254" + phone.substring(1)
+                phone.startsWith("+254") -> phone.substring(1)
+                phone.startsWith("254") -> phone
+                else -> phone
+            }
+
+            val checkoutId = UUID.randomUUID().toString()
+
+            // ✅ FIXED HERE (phoneNumber NOT phone)
+            stkRequestRepository.save(
+                StkRequest(
+                    checkoutRequestId = checkoutId,
+                    landlordId = UUID.fromString(landlordId),
+                    phoneNumber = formattedPhone, // 🔥 FIXED
+                    amount = BigDecimal(amount),
+                    status = "PENDING",
+                    createdAt = LocalDateTime.now()
+                )
+            )
+
+            log.info("📲 STK request saved successfully")
+
+            // 👉 Next: connect Daraja here
+
+        } catch (e: Exception) {
+            log.error("❌ STK initiation failed", e)
+        }
+    }
 
     // =========================================================
     // 🔵 TENANT RENT PAYMENTS
@@ -67,8 +106,6 @@ class MpesaService(
             val safeReference = reference ?: return
             val safeAccount = account ?: return
 
-            log.info("💰 RENT PAYMENT → ref=$safeReference amount=$safeAmount")
-
             val jsonPayload = objectMapper.writeValueAsString(payload)
 
             val exists = jdbcTemplate.queryForObject(
@@ -101,10 +138,10 @@ class MpesaService(
             )
 
             val unit = unitRepository.findByReferenceNumber(safeAccount)
-                ?: return log.warn("❌ Unit not found")
+                ?: return
 
             val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
-                ?: return log.warn("❌ No active tenancy")
+                ?: return
 
             jdbcTemplate.execute(
                 "SELECT process_payment(?::uuid, ?::numeric, ?)",
@@ -124,29 +161,21 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🟢 SUBSCRIPTIONS (🔥 FINAL FIX WITH STK TABLE)
+    // 🟢 SUBSCRIPTIONS CALLBACK
     // =========================================================
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
         try {
-
-            log.info("🔥 SUBSCRIPTION CALLBACK FULL: $payload")
 
             val callback = payload["Body"]
                 ?.let { it as? Map<*, *> }
                 ?.get("stkCallback") as? Map<*, *> ?: return
 
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
-            val resultDesc = callback["ResultDesc"]?.toString()
-
             val checkoutId = callback["CheckoutRequestID"]?.toString()
 
-            // ❌ FAILED PAYMENT
             if (resultCode != 0) {
 
-                log.warn("❌ Subscription failed → code=$resultCode desc=$resultDesc")
-
-                // update status if exists
                 if (checkoutId != null) {
                     stkRequestRepository.findByCheckoutRequestId(checkoutId)?.let {
                         it.status = "FAILED"
@@ -175,25 +204,18 @@ class MpesaService(
             val safeReference = reference ?: return
             val safeCheckoutId = checkoutId ?: return
 
-            log.info("💸 SUBSCRIPTION SUCCESS → checkoutId=$safeCheckoutId amount=$safeAmount")
-
-            // 🔥 GET STK REQUEST
             val stkRequest = stkRequestRepository.findByCheckoutRequestId(safeCheckoutId)
-                ?: throw RuntimeException("❌ STK request not found")
+                ?: throw RuntimeException("STK request not found")
 
-            val landlord = userRepository.findById(stkRequest.landlordId)
-                .orElseThrow { RuntimeException("❌ Landlord not found") }
+            val landlord = userRepository.findById(stkRequest.landlordId).orElseThrow()
 
-            // 🛑 DUPLICATE CHECK
             if (platformTransactionRepository.existsByReference(safeReference)) {
-                log.warn("⚠️ Duplicate subscription ignored")
                 return
             }
 
             val plan = subscriptionPlanRepository.findMatchingPlan(safeAmount)
-                ?: throw RuntimeException("❌ Plan not found")
+                ?: throw RuntimeException("Plan not found")
 
-            // 💰 SAVE TRANSACTION
             platformTransactionRepository.save(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
@@ -203,19 +225,16 @@ class MpesaService(
                 )
             )
 
-            // 💰 UPDATE WALLET
             jdbcTemplate.update(
                 "UPDATE platform_wallet SET balance = balance + ?",
                 safeAmount
             )
 
-            // 🔄 EXPIRE OLD
             jdbcTemplate.update(
                 "UPDATE subscriptions SET status = 'EXPIRED' WHERE landlord_id = ?",
                 landlord.id
             )
 
-            // ✅ CREATE NEW SUBSCRIPTION
             val start = LocalDateTime.now()
 
             subscriptionRepository.save(
@@ -229,11 +248,10 @@ class MpesaService(
                 )
             )
 
-            // ✅ UPDATE STK STATUS
             stkRequest.status = "SUCCESS"
             stkRequestRepository.save(stkRequest)
 
-            log.info("🎉 SUBSCRIPTION ACTIVATED SUCCESSFULLY")
+            log.info("🎉 SUBSCRIPTION ACTIVATED")
 
         } catch (e: Exception) {
             log.error("❌ Subscription callback crashed", e)

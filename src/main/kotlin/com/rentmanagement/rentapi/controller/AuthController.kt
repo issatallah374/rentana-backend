@@ -113,11 +113,4 @@ class AuthController(
         return AuthResponse(token)
     }
 
-    // =========================
-    // 🔥 TEMP DEBUG HASH (REMOVE AFTER USE)
-    // =========================
-    @GetMapping("/debug/hash")
-    fun hash(@RequestParam password: String): String {
-        return BCryptPasswordEncoder().encode(password)
-    }
 }
