@@ -1,4 +1,4 @@
-package com.rentmanagement.rentapi.controllers
+package com.rentmanagement.rentapi.controller
 
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.core.Authentication

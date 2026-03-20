@@ -1,4 +1,4 @@
-package com.rentmanagement.rentapi.controllers
+package com.rentmanagement.rentapi.controller
 
 import org.springframework.stereotype.Controller
 import org.springframework.web.bind.annotation.GetMapping
