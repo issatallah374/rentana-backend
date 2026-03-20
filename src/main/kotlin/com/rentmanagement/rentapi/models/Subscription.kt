@@ -15,8 +15,9 @@ data class Subscription(
     @Column(name = "landlord_id", nullable = false)
     var landlordId: UUID,
 
-    @Column(name = "plan_id", nullable = false)
-    var planId: UUID,
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "plan_id", nullable = false)
+    var plan: SubscriptionPlan,
 
     @Column(name = "start_date")
     var startDate: LocalDateTime? = null,

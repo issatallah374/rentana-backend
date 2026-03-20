@@ -9,7 +9,8 @@ import java.util.*
 data class SubscriptionPlan(
 
     @Id
-    val id: UUID,
+    @GeneratedValue(strategy = GenerationType.UUID)
+    val id: UUID? = null,
 
     val name: String,
 

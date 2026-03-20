@@ -20,6 +20,11 @@
         th, td {
             padding: 10px;
             border-bottom: 1px solid #334155;
+            text-align: center;
+        }
+
+        th {
+            background: #020617;
         }
 
         button {
@@ -27,10 +32,24 @@
             border: none;
             border-radius: 6px;
             cursor: pointer;
+            margin: 2px;
         }
 
         .paid { background: green; color: white; }
         .reject { background: red; color: white; }
+
+        .pending { color: orange; }
+        .approved { color: lightgreen; }
+        .rejected { color: red; }
+
+        .disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .loading {
+            color: #94a3b8;
+        }
     </style>
 </head>
 
@@ -39,16 +58,17 @@
 <h1>💸 Payout Dashboard</h1>
 
 <h2>Platform Wallet</h2>
-<div id="wallet">Loading...</div>
+<div id="wallet" class="loading">Loading...</div>
 
 <hr>
 
-<h2>Payouts</h2>
+<h2>Payout Requests</h2>
 
 <table>
     <thead>
     <tr>
         <th>ID</th>
+        <th>Property</th>
         <th>Amount</th>
         <th>Destination</th>
         <th>Status</th>
@@ -60,34 +80,30 @@
 
 <script>
 
-    // 🔥 CHANGE THIS ONLY IF DOMAIN CHANGES
     const BASE_URL = "https://www.rentana.online";
-
-    // 🔑 TOKEN (YOU MUST SET THIS IN BROWSER)
     const token = localStorage.getItem("token");
 
     if (!token) {
-        alert("❌ No token found. Put token in console.");
+        alert("❌ No token found. Set token in localStorage.");
     }
 
     // ================= WALLET =================
     fetch(BASE_URL + '/api/admin/platform-wallet', {
-        headers: {
-            "Authorization": "Bearer " + token
-        }
+        headers: { "Authorization": "Bearer " + token }
     })
     .then(res => res.json())
     .then(data => {
         document.getElementById("wallet").innerText = "KES " + data.balance;
+    })
+    .catch(() => {
+        document.getElementById("wallet").innerText = "❌ Failed to load";
     });
 
     // ================= LOAD PAYOUTS =================
     function loadPayouts() {
 
         fetch(BASE_URL + '/api/admin/payouts', {
-            headers: {
-                "Authorization": "Bearer " + token
-            }
+            headers: { "Authorization": "Bearer " + token }
         })
         .then(res => res.json())
         .then(data => {
@@ -97,50 +113,75 @@
 
             data.forEach(p => {
 
-                let row = "<tr>"
-                    + "<td>" + p.id + "</td>"
-                    + "<td>" + p.amount + "</td>"
-                    + "<td>" + p.destination + "</td>"
-                    + "<td>" + p.status + "</td>"
-                    + "<td>"
-                    + "<button class='paid' onclick=\"markPaid('" + p.id + "')\">PAID</button>"
-                    + "<button class='reject' onclick=\"reject('" + p.id + "')\">REJECT</button>"
-                    + "</td>"
-                    + "</tr>";
+                let statusClass = p.status.toLowerCase();
+
+                let disableButtons = p.status !== "PENDING" ? "disabled" : "";
+
+                let row = `
+                    <tr>
+                        <td>${p.id}</td>
+                        <td>${p.propertyId}</td>
+                        <td>KES ${p.amount}</td>
+                        <td>${p.destination}</td>
+                        <td class="${statusClass}">${p.status}</td>
+                        <td>
+                            <button class="paid ${disableButtons}" onclick="markPaid('${p.id}', this)">PAID</button>
+                            <button class="reject ${disableButtons}" onclick="reject('${p.id}', this)">REJECT</button>
+                        </td>
+                    </tr>
+                `;
 
                 table.innerHTML += row;
             });
 
-        });
+        })
+        .catch(() => alert("❌ Failed to load payouts"));
     }
 
     // ================= MARK PAID =================
-    function markPaid(id) {
+    function markPaid(id, btn) {
+
+        if (!confirm("Mark this payout as PAID?")) return;
+
+        btn.classList.add("disabled");
 
         fetch(BASE_URL + '/api/payouts/' + id + '/mark-paid', {
             method: 'POST',
-            headers: {
-                "Authorization": "Bearer " + token
-            }
+            headers: { "Authorization": "Bearer " + token }
         })
-        .then(res => res.text())
+        .then(res => {
+            if (!res.ok) throw new Error();
+            return res.text();
+        })
         .then(() => {
-            alert("✅ Paid!");
+            alert("✅ Payout processed!");
             loadPayouts();
         })
-        .catch(() => alert("❌ Failed"));
+        .catch(() => {
+            alert("❌ Failed to process payout");
+            btn.classList.remove("disabled");
+        });
     }
 
     // ================= REJECT =================
-    function reject(id) {
+    function reject(id, btn) {
+
+        if (!confirm("Reject this payout?")) return;
+
+        btn.classList.add("disabled");
 
         fetch(BASE_URL + '/api/payouts/' + id + '/reject', {
             method: 'POST',
-            headers: {
-                "Authorization": "Bearer " + token
-            }
+            headers: { "Authorization": "Bearer " + token }
         })
-        .then(() => loadPayouts());
+        .then(res => {
+            if (!res.ok) throw new Error();
+            loadPayouts();
+        })
+        .catch(() => {
+            alert("❌ Failed to reject payout");
+            btn.classList.remove("disabled");
+        });
     }
 
     // INIT

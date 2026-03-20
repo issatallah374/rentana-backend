@@ -3,6 +3,7 @@ package com.rentmanagement.rentapi.services
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.util.*
 
@@ -128,14 +129,16 @@ class PayoutService(
     }
 
     // =====================================================
-    // 🔥 MARK AS PAID (ADMIN ONLY)
+    // 🔥 MARK AS PAID (ADMIN ONLY - FULLY SAFE)
     // =====================================================
+    @Transactional
     fun markAsPaid(payoutId: UUID) {
 
         log.info("💰 Processing payout → id=$payoutId")
 
+        // 🔒 LOCK ROW (prevents double approval)
         val payout = jdbcTemplate.queryForMap(
-            "SELECT * FROM payout_requests WHERE id = ?",
+            "SELECT * FROM payout_requests WHERE id = ? FOR UPDATE",
             payoutId
         )
 
@@ -145,31 +148,27 @@ class PayoutService(
             throw RuntimeException("Payout already processed")
         }
 
-        // ✅ FIXED (CRITICAL)
         val propertyId = UUID.fromString(payout["property_id"].toString())
         val amount = BigDecimal(payout["amount"].toString())
 
         // ================================
-        // 💰 DOUBLE BALANCE CHECK
+        // 💰 SAFE DEDUCTION (ANTI-RACE)
         // ================================
-        val balance = jdbcTemplate.queryForObject(
-            "SELECT balance FROM wallets WHERE property_id = ?",
-            BigDecimal::class.java,
-            propertyId
-        ) ?: BigDecimal.ZERO
-
-        if (balance < amount) {
-            throw RuntimeException("Insufficient wallet balance at payout time")
-        }
-
-        // ================================
-        // 💰 DEDUCT WALLET
-        // ================================
-        jdbcTemplate.update(
-            "UPDATE wallets SET balance = balance - ? WHERE property_id = ?",
+        val updated = jdbcTemplate.update(
+            """
+            UPDATE wallets
+            SET balance = balance - ?
+            WHERE property_id = ?
+            AND balance >= ?
+            """,
             amount,
-            propertyId
+            propertyId,
+            amount
         )
+
+        if (updated == 0) {
+            throw RuntimeException("Insufficient or changed balance")
+        }
 
         // ================================
         // 📒 LEDGER ENTRY
@@ -181,13 +180,14 @@ class PayoutService(
                 entry_type,
                 category,
                 amount,
-                reference
+                reference,
+                created_at
             )
-            VALUES (?, 'DEBIT', 'PAYOUT', ?, ?)
+            VALUES (?, 'DEBIT', 'PAYOUT', ?, ?, now())
             """,
             propertyId,
             amount,
-            payoutId.toString()
+            "PAYOUT:$payoutId"
         )
 
         // ================================

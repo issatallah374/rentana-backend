@@ -1,26 +1,67 @@
 package com.rentmanagement.rentapi.services
 
 import com.rentmanagement.rentapi.models.Property
+import com.rentmanagement.rentapi.models.Wallet
 import com.rentmanagement.rentapi.repository.PropertyRepository
+import com.rentmanagement.rentapi.repository.SubscriptionRepository
 import com.rentmanagement.rentapi.repository.UserRepository
+import com.rentmanagement.rentapi.repository.WalletRepository
 import org.springframework.stereotype.Service
+import java.time.LocalDateTime
 import java.util.UUID
 import kotlin.random.Random
 
 @Service
 class PropertyService(
     private val propertyRepository: PropertyRepository,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val subscriptionRepository: SubscriptionRepository,
+    private val walletRepository: WalletRepository
 ) {
 
     fun createProperty(property: Property): Property {
 
-        // Generate prefix automatically if missing
+        val landlordId = property.landlord.id
+            ?: throw RuntimeException("Invalid landlord")
+
+        val sub = subscriptionRepository
+            .findTopByLandlordIdOrderByCreatedAtDesc(landlordId)
+            ?: throw RuntimeException("No active subscription")
+
+        // ✅ SAFE NULL HANDLING (FIXED)
+        val isExpired =
+            sub.status != "ACTIVE" ||
+                    sub.endDate?.isBefore(LocalDateTime.now()) != false
+
+        if (isExpired) {
+            throw RuntimeException("Subscription expired")
+        }
+
+        // 🔥 PROPERTY LIMIT ENFORCEMENT
+        val currentCount = propertyRepository.countByLandlordId(landlordId)
+        val maxAllowed = sub.plan.propertyLimit
+
+        if (currentCount >= maxAllowed) {
+            throw RuntimeException("PROPERTY_LIMIT_REACHED")
+        }
+
+        // ✅ Generate prefix automatically if missing
         if (property.accountPrefix.isNullOrBlank()) {
             property.accountPrefix = generateUniquePrefix(property.name)
         }
 
-        return propertyRepository.save(property)
+        // ✅ SAVE PROPERTY FIRST
+        val savedProperty = propertyRepository.save(property)
+
+        // 🔥 AUTO-CREATE WALLET (CRITICAL)
+        val wallet = Wallet(
+            landlord = savedProperty.landlord,
+            property = savedProperty
+        )
+
+        walletRepository.save(wallet)
+
+        return savedProperty
     }
 
     private fun generateUniquePrefix(propertyName: String?): String {
@@ -34,11 +75,8 @@ class PropertyService(
         var prefix: String
 
         do {
-
             val randomNumber = Random.nextInt(100, 999)
-
             prefix = "$base$randomNumber"
-
         } while (propertyRepository.findByAccountPrefix(prefix) != null)
 
         return prefix
@@ -59,7 +97,6 @@ class PropertyService(
     }
 
     fun deleteProperty(id: UUID) {
-
         propertyRepository.deleteById(id)
     }
 }

@@ -50,6 +50,9 @@ interface PropertyRepository : JpaRepository<Property, UUID> {
         """,
         nativeQuery = true
     )
+
+    fun countByLandlordId(landlordId: UUID): Int
+
     fun getPropertySummary(
         @Param("propertyId") propertyId: UUID
     ): PropertySummaryProjection?
