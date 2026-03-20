@@ -34,22 +34,31 @@ class SecurityConfig(
 
             .authorizeHttpRequests {
 
-                // ✅ allow preflight
+                // =========================
+                // ✅ PREFLIGHT (CORS)
+                // =========================
                 it.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                // ✅ public auth
+                // =========================
+                // ✅ PUBLIC AUTH
+                // =========================
                 it.requestMatchers("/api/auth/**").permitAll()
 
-                // ✅ TEMP (you had this)
-                it.requestMatchers("/api/tenants/**").permitAll()
-
-                // 🔐 ADMIN PANEL (HTML)
+                // =========================
+                // ✅ ADMIN HTML PAGES
+                // (login must be public)
+                // =========================
+                it.requestMatchers("/admin/login").permitAll()
                 it.requestMatchers("/admin/**").hasRole("ADMIN")
 
+                // =========================
                 // 🔐 ADMIN APIs
+                // =========================
                 it.requestMatchers("/api/admin/**").hasRole("ADMIN")
 
+                // =========================
                 // 🔐 PROTECTED APIs
+                // =========================
                 it.requestMatchers(
                     "/api/properties/**",
                     "/api/units/**",
@@ -58,7 +67,9 @@ class SecurityConfig(
                     "/api/payouts/**"
                 ).authenticated()
 
-                // ❌ everything else blocked
+                // =========================
+                // ❌ EVERYTHING ELSE
+                // =========================
                 it.anyRequest().permitAll()
             }
 
@@ -68,6 +79,9 @@ class SecurityConfig(
                 )
             }
 
+            // =========================
+            // 🔐 JWT FILTER
+            // =========================
             .addFilterBefore(
                 jwtAuthFilter,
                 UsernamePasswordAuthenticationFilter::class.java
@@ -81,9 +95,15 @@ class SecurityConfig(
 
         val config = CorsConfiguration()
 
+        // ⚠️ for production you can restrict this later
         config.allowedOrigins = listOf("*")
-        config.allowedMethods = listOf("GET", "POST", "PUT", "DELETE", "OPTIONS")
+
+        config.allowedMethods = listOf(
+            "GET", "POST", "PUT", "DELETE", "OPTIONS"
+        )
+
         config.allowedHeaders = listOf("*")
+
         config.allowCredentials = false
 
         val source = UrlBasedCorsConfigurationSource()

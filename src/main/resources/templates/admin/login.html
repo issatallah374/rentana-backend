@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Login</title>
+
+    <style>
+        body {
+            font-family: Arial;
+            background: #0f172a;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 30px;
+            border-radius: 12px;
+            width: 300px;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            border: none;
+        }
+
+        button {
+            width: 100%;
+            padding: 10px;
+            background: #38bdf8;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="card">
+    <h2>🔐 Admin Login</h2>
+
+    <input id="email" type="text" placeholder="Email">
+    <input id="password" type="password" placeholder="Password">
+
+    <button onclick="login()">Login</button>
+</div>
+
+<script>
+
+    const BASE_URL = "https://www.rentana.online";
+
+    function login() {
+
+        const email = document.getElementById("email").value;
+        const password = document.getElementById("password").value;
+
+        fetch(BASE_URL + "/api/auth/login", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                email: email,
+                password: password
+            })
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Login failed");
+            return res.json();
+        })
+        .then(data => {
+
+            // 🔑 SAVE TOKEN
+            localStorage.setItem("token", data.token);
+
+            // 🚀 GO TO DASHBOARD
+            window.location.href = "/admin/dashboard";
+        })
+        .catch(() => {
+            alert("❌ Invalid login");
+        });
+    }
+
+</script>
+
+</body>
+</html>
