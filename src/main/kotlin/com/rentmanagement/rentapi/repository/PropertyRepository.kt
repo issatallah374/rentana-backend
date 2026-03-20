@@ -18,9 +18,9 @@ interface PropertyRepository : JpaRepository<Property, UUID> {
 
     fun existsByAccountPrefix(accountPrefix: String): Boolean
 
-    // 🔥 ADD THIS
     fun countByLandlord(landlord: User): Int
 
+    fun countByLandlordId(landlordId: UUID): Int
 
     // ===============================
     // DASHBOARD / REPORTING
@@ -30,7 +30,7 @@ interface PropertyRepository : JpaRepository<Property, UUID> {
             SELECT 
                 p.id as propertyId,
                 COUNT(DISTINCT u.id) as totalUnits,
-                COUNT(DISTINCT t.id) FILTER (WHERE t.active = true) as activeTenancies,
+                COUNT(DISTINCT t.id) FILTER (WHERE t.is_active = true) as activeTenancies,
                 COALESCE(SUM(
                     CASE 
                         WHEN l.entry_type = 'DEBIT' THEN l.amount
@@ -50,9 +50,6 @@ interface PropertyRepository : JpaRepository<Property, UUID> {
         """,
         nativeQuery = true
     )
-
-    fun countByLandlordId(landlordId: UUID): Int
-
     fun getPropertySummary(
         @Param("propertyId") propertyId: UUID
     ): PropertySummaryProjection?
