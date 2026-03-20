@@ -86,7 +86,7 @@ class PayoutService(
         }
 
         // ================================
-        // 🔒 DESTINATION LOCK (VERY IMPORTANT)
+        // 🔒 DESTINATION LOCK
         // ================================
         val existingDestination = jdbcTemplate.query(
             """
@@ -139,14 +139,15 @@ class PayoutService(
             payoutId
         )
 
-        val status = payout["status"] as String
+        val status = payout["status"]?.toString()
 
         if (status != "PENDING") {
             throw RuntimeException("Payout already processed")
         }
 
-        val propertyId = payout["property_id"] as UUID
-        val amount = payout["amount"] as BigDecimal
+        // ✅ FIXED (CRITICAL)
+        val propertyId = UUID.fromString(payout["property_id"].toString())
+        val amount = BigDecimal(payout["amount"].toString())
 
         // ================================
         // 💰 DOUBLE BALANCE CHECK
