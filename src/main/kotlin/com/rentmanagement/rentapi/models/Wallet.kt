@@ -8,7 +8,7 @@ import java.util.UUID
 @Table(
     name = "wallets",
     uniqueConstraints = [
-        UniqueConstraint(columnNames = ["property_id"]) // ✅ enforce 1 wallet per property
+        UniqueConstraint(columnNames = ["property_id"])
     ]
 )
 class Wallet(
@@ -17,14 +17,9 @@ class Wallet(
     @GeneratedValue
     val id: UUID? = null,
 
-    // ✅ Many wallets can belong to one landlord (correct)
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "landlord_id", nullable = false)
-    val landlord: User,
-
-    // 🔥 CRITICAL: enforce 1 wallet per property
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "property_id", nullable = false)
+    // 🔥 ONLY PROPERTY (landlord removed completely)
+    @OneToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "property_id", nullable = false, unique = true)
     val property: Property,
 
     @Column(nullable = false, precision = 19, scale = 2)

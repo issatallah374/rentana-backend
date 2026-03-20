@@ -3,6 +3,7 @@ package com.rentmanagement.rentapi.services
 import com.rentmanagement.rentapi.models.Property
 import com.rentmanagement.rentapi.models.Wallet
 import com.rentmanagement.rentapi.repository.PropertyRepository
+import com.rentmanagement.rentapi.repository.SubscriptionPlanRepository
 import com.rentmanagement.rentapi.repository.SubscriptionRepository
 import com.rentmanagement.rentapi.repository.UserRepository
 import com.rentmanagement.rentapi.repository.WalletRepository
@@ -16,6 +17,7 @@ class PropertyService(
     private val propertyRepository: PropertyRepository,
     private val userRepository: UserRepository,
     private val subscriptionRepository: SubscriptionRepository,
+    private val subscriptionPlanRepository: SubscriptionPlanRepository,
     private val walletRepository: WalletRepository
 ) {
 
@@ -28,7 +30,7 @@ class PropertyService(
             .findTopByLandlordIdOrderByCreatedAtDesc(landlordId)
             ?: throw RuntimeException("No active subscription")
 
-        // ✅ SAFE NULL HANDLING (FIXED)
+        // ✅ SAFE NULL HANDLING
         val isExpired =
             sub.status != "ACTIVE" ||
                     sub.endDate?.isBefore(LocalDateTime.now()) != false
@@ -37,25 +39,27 @@ class PropertyService(
             throw RuntimeException("Subscription expired")
         }
 
-        // 🔥 PROPERTY LIMIT ENFORCEMENT
+        // 🔥 FETCH PLAN USING planId (FIXED)
+        val plan = subscriptionPlanRepository.findById(sub.planId)
+            .orElseThrow { RuntimeException("Subscription plan not found") }
+
         val currentCount = propertyRepository.countByLandlordId(landlordId)
-        val maxAllowed = sub.plan.propertyLimit
+        val maxAllowed = plan.propertyLimit
 
         if (currentCount >= maxAllowed) {
             throw RuntimeException("PROPERTY_LIMIT_REACHED")
         }
 
-        // ✅ Generate prefix automatically if missing
+        // ✅ Generate prefix
         if (property.accountPrefix.isNullOrBlank()) {
             property.accountPrefix = generateUniquePrefix(property.name)
         }
 
-        // ✅ SAVE PROPERTY FIRST
+        // ✅ SAVE PROPERTY
         val savedProperty = propertyRepository.save(property)
 
-        // 🔥 AUTO-CREATE WALLET (CRITICAL)
+        // 🔥 CREATE WALLET (NO landlord anymore)
         val wallet = Wallet(
-            landlord = savedProperty.landlord,
             property = savedProperty
         )
 
