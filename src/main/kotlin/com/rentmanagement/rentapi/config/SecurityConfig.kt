@@ -45,14 +45,12 @@ class SecurityConfig(
                 it.requestMatchers("/api/auth/**").permitAll()
 
                 // =========================
-                // ✅ ADMIN HTML PAGES
-                // (login must be public)
+                // ✅ ADMIN HTML (ALLOW LOAD)
                 // =========================
-                it.requestMatchers("/admin/login").permitAll()
-                it.requestMatchers("/admin/**").hasRole("ADMIN")
+                it.requestMatchers("/admin/**").permitAll()
 
                 // =========================
-                // 🔐 ADMIN APIs
+                // 🔐 ADMIN APIs (STRICT)
                 // =========================
                 it.requestMatchers("/api/admin/**").hasRole("ADMIN")
 
@@ -68,7 +66,7 @@ class SecurityConfig(
                 ).authenticated()
 
                 // =========================
-                // ❌ EVERYTHING ELSE
+                // ✅ EVERYTHING ELSE
                 // =========================
                 it.anyRequest().permitAll()
             }
@@ -95,7 +93,6 @@ class SecurityConfig(
 
         val config = CorsConfiguration()
 
-        // ⚠️ for production you can restrict this later
         config.allowedOrigins = listOf("*")
 
         config.allowedMethods = listOf(
