@@ -34,19 +34,31 @@ class SecurityConfig(
 
             .authorizeHttpRequests {
 
+                // ✅ allow preflight
                 it.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
+                // ✅ public auth
                 it.requestMatchers("/api/auth/**").permitAll()
 
-                it.requestMatchers("/api/tenants/**").permitAll() // FIX
+                // ✅ TEMP (you had this)
+                it.requestMatchers("/api/tenants/**").permitAll()
 
+                // 🔐 ADMIN PANEL (HTML)
+                it.requestMatchers("/admin/**").hasRole("ADMIN")
+
+                // 🔐 ADMIN APIs
+                it.requestMatchers("/api/admin/**").hasRole("ADMIN")
+
+                // 🔐 PROTECTED APIs
                 it.requestMatchers(
                     "/api/properties/**",
                     "/api/units/**",
                     "/api/tenancies/**",
-                    "/api/users/**"
+                    "/api/users/**",
+                    "/api/payouts/**"
                 ).authenticated()
 
+                // ❌ everything else blocked
                 it.anyRequest().permitAll()
             }
 
