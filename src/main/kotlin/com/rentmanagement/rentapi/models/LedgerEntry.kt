@@ -36,6 +36,9 @@ data class LedgerEntry(
     @Column(nullable = false)
     val amount: BigDecimal,
 
+    @Column(name = "reference")
+    var reference: String? = null,
+
     @Column(name = "reference_id")
     val referenceId: UUID? = null,
 

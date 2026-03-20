@@ -30,7 +30,6 @@ class PropertyService(
             .findTopByLandlordIdOrderByCreatedAtDesc(landlordId)
             ?: throw RuntimeException("No active subscription")
 
-        // ✅ SAFE NULL HANDLING
         val isExpired =
             sub.status != "ACTIVE" ||
                     sub.endDate?.isBefore(LocalDateTime.now()) != false
@@ -39,26 +38,22 @@ class PropertyService(
             throw RuntimeException("Subscription expired")
         }
 
-        // 🔥 FETCH PLAN USING planId (FIXED)
         val plan = subscriptionPlanRepository.findById(sub.planId)
             .orElseThrow { RuntimeException("Subscription plan not found") }
 
         val currentCount = propertyRepository.countByLandlordId(landlordId)
-        val maxAllowed = plan.propertyLimit
 
-        if (currentCount >= maxAllowed) {
+        if (currentCount >= plan.propertyLimit) {
             throw RuntimeException("PROPERTY_LIMIT_REACHED")
         }
 
-        // ✅ Generate prefix
         if (property.accountPrefix.isNullOrBlank()) {
             property.accountPrefix = generateUniquePrefix(property.name)
         }
 
-        // ✅ SAVE PROPERTY
         val savedProperty = propertyRepository.save(property)
 
-        // 🔥 CREATE WALLET (NO landlord anymore)
+        // ✅ SAFE: only property
         val wallet = Wallet(
             property = savedProperty
         )

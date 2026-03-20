@@ -14,9 +14,7 @@ import java.util.UUID
 class WalletService(
 
     private val walletRepository: WalletRepository,
-
     private val propertyRepository: PropertyRepository,
-
     private val ledgerEntryRepository: LedgerEntryRepository
 
 ) {
@@ -35,7 +33,6 @@ class WalletService(
             ?: walletRepository.save(
                 Wallet(
                     property = property,
-                    landlord = property.landlord,
                     balance = BigDecimal.ZERO
                 )
             )
@@ -91,17 +88,11 @@ class WalletService(
             WalletTransaction(
                 id = it.id!!,
                 amount = it.amount,
-
-                // convert enums to string
                 entryType = it.entryType.name,
-
                 category = it.category?.name,
-
-                reference = null, // your LedgerEntry doesn't have reference
-
+                reference = it.reference, // ✅ use reference now
                 createdAt = it.createdAt
             )
         }
     }
-
 }

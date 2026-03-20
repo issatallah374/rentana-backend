@@ -17,7 +17,6 @@ class Wallet(
     @GeneratedValue
     val id: UUID? = null,
 
-    // 🔥 ONLY PROPERTY (landlord removed completely)
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "property_id", nullable = false, unique = true)
     val property: Property,
