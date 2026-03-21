@@ -15,37 +15,23 @@ class PayoutService(
     private val log = LoggerFactory.getLogger(PayoutService::class.java)
 
     // =====================================================
-    // 💸 REQUEST PAYOUT (SECURE)
+    // 💸 REQUEST PAYOUT (AUTO DESTINATION)
     // =====================================================
     fun requestPayout(
         landlordId: UUID,
         propertyId: UUID,
-        amount: BigDecimal,
-        method: String,
-        destination: String
+        amount: BigDecimal
     ) {
 
-        log.info("💸 Payout request → landlord=$landlordId property=$propertyId amount=$amount")
-
-        // ================================
-        // 🔐 VALIDATIONS
-        // ================================
         if (amount <= BigDecimal.ZERO) {
             throw RuntimeException("Invalid amount")
         }
 
-        val safeMethod = method.uppercase()
-        if (safeMethod !in listOf("MPESA", "BANK")) {
-            throw RuntimeException("Invalid payout method")
+        if (amount < BigDecimal("600")) {
+            throw RuntimeException("Minimum withdrawal is 600")
         }
 
-        if (destination.isBlank()) {
-            throw RuntimeException("Destination required")
-        }
-
-        // ================================
-        // 🔐 VERIFY PROPERTY OWNERSHIP
-        // ================================
+        // ✅ OWNERSHIP CHECK
         val ownsProperty = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM properties WHERE id = ? AND landlord_id = ?",
             Int::class.java,
@@ -54,12 +40,10 @@ class PayoutService(
         ) ?: 0
 
         if (ownsProperty == 0) {
-            throw RuntimeException("Unauthorized property access")
+            throw RuntimeException("Unauthorized")
         }
 
-        // ================================
-        // 💰 CHECK BALANCE
-        // ================================
+        // ✅ BALANCE
         val balance = jdbcTemplate.queryForObject(
             "SELECT balance FROM wallets WHERE property_id = ?",
             BigDecimal::class.java,
@@ -70,42 +54,33 @@ class PayoutService(
             throw RuntimeException("Insufficient balance")
         }
 
-        // ================================
-        // 🛑 ONE ACTIVE REQUEST ONLY
-        // ================================
+        // ✅ GET SAVED METHOD
+        val wallet = jdbcTemplate.queryForMap(
+            "SELECT mpesa_phone, account_number FROM wallets WHERE property_id = ?",
+            propertyId
+        )
+
+        val mpesa = wallet["mpesa_phone"]?.toString()
+        val bank = wallet["account_number"]?.toString()
+
+        val (method, destination) = when {
+            !mpesa.isNullOrBlank() -> "MPESA" to mpesa
+            !bank.isNullOrBlank() -> "BANK" to bank
+            else -> throw RuntimeException("Payout setup incomplete")
+        }
+
+        // ✅ BLOCK MULTIPLE REQUESTS
         val pending = jdbcTemplate.queryForObject(
-            """
-            SELECT COUNT(*) FROM payout_requests 
-            WHERE property_id = ? AND status = 'PENDING'
-            """,
+            "SELECT COUNT(*) FROM payout_requests WHERE property_id = ? AND status = 'PENDING'",
             Int::class.java,
             propertyId
         ) ?: 0
 
         if (pending > 0) {
-            throw RuntimeException("You already have a pending payout")
+            throw RuntimeException("Pending payout exists")
         }
 
-        // ================================
-        // 🔒 DESTINATION LOCK
-        // ================================
-        val existingDestination = jdbcTemplate.query(
-            """
-            SELECT destination FROM payout_requests 
-            WHERE property_id = ? 
-            LIMIT 1
-            """.trimIndent(),
-            arrayOf(propertyId)
-        ) { rs, _ -> rs.getString("destination") }
-            .firstOrNull()
-
-        if (existingDestination != null && existingDestination != destination) {
-            throw RuntimeException("Payout destination locked. Contact support to change.")
-        }
-
-        // ================================
-        // 💾 INSERT REQUEST
-        // ================================
+        // ✅ INSERT
         jdbcTemplate.update(
             """
             INSERT INTO payout_requests(
@@ -121,39 +96,31 @@ class PayoutService(
             landlordId,
             propertyId,
             amount,
-            safeMethod,
+            method,
             destination
         )
 
-        log.info("✅ Payout request created successfully")
+        log.info("✅ payout requested → $method → $destination")
     }
 
     // =====================================================
-    // 🔥 MARK AS PAID (ADMIN ONLY - FULLY SAFE)
+    // 🔥 ADMIN APPROVES
     // =====================================================
     @Transactional
     fun markAsPaid(payoutId: UUID) {
 
-        log.info("💰 Processing payout → id=$payoutId")
-
-        // 🔒 LOCK ROW (prevents double approval)
         val payout = jdbcTemplate.queryForMap(
             "SELECT * FROM payout_requests WHERE id = ? FOR UPDATE",
             payoutId
         )
 
-        val status = payout["status"]?.toString()
-
-        if (status != "PENDING") {
-            throw RuntimeException("Payout already processed")
+        if (payout["status"] != "PENDING") {
+            throw RuntimeException("Already processed")
         }
 
         val propertyId = UUID.fromString(payout["property_id"].toString())
         val amount = BigDecimal(payout["amount"].toString())
 
-        // ================================
-        // 💰 SAFE DEDUCTION (ANTI-RACE)
-        // ================================
         val updated = jdbcTemplate.update(
             """
             UPDATE wallets
@@ -167,12 +134,9 @@ class PayoutService(
         )
 
         if (updated == 0) {
-            throw RuntimeException("Insufficient or changed balance")
+            throw RuntimeException("Balance issue")
         }
 
-        // ================================
-        // 📒 LEDGER ENTRY
-        // ================================
         jdbcTemplate.update(
             """
             INSERT INTO ledger_entries(
@@ -190,9 +154,6 @@ class PayoutService(
             "PAYOUT:$payoutId"
         )
 
-        // ================================
-        // ✅ MARK PAID
-        // ================================
         jdbcTemplate.update(
             """
             UPDATE payout_requests
@@ -202,13 +163,8 @@ class PayoutService(
             """,
             payoutId
         )
-
-        log.info("🎉 Payout completed successfully")
     }
 
-    // =====================================================
-    // ❌ REJECT PAYOUT
-    // =====================================================
     fun rejectPayout(payoutId: UUID) {
 
         val updated = jdbcTemplate.update(
@@ -222,9 +178,7 @@ class PayoutService(
         )
 
         if (updated == 0) {
-            throw RuntimeException("Payout not found or already processed")
+            throw RuntimeException("Not found")
         }
-
-        log.warn("❌ Payout rejected → id=$payoutId")
     }
 }

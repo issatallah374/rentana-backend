@@ -17,14 +17,12 @@ class PayoutController(
     private val log = LoggerFactory.getLogger(PayoutController::class.java)
 
     // =====================================================
-    // 🔥 REQUEST PAYOUT (SECURE)
+    // 💸 REQUEST PAYOUT (CLEAN + SECURE)
     // =====================================================
     @PostMapping("/request")
     fun requestPayout(
         @RequestParam propertyId: UUID,
         @RequestParam amount: BigDecimal,
-        @RequestParam method: String,
-        @RequestParam destination: String,
         authentication: Authentication?
     ): ResponseEntity<String> {
 
@@ -43,11 +41,9 @@ class PayoutController(
         log.info("💸 Authenticated payout request → landlord=$landlordId")
 
         payoutService.requestPayout(
-            landlordId,
-            propertyId,
-            amount,
-            method,
-            destination
+            landlordId = landlordId,
+            propertyId = propertyId,
+            amount = amount
         )
 
         return ResponseEntity.ok("Payout requested")
@@ -63,19 +59,14 @@ class PayoutController(
     ): ResponseEntity<String> {
 
         if (authentication == null) {
-            log.error("❌ Unauthorized admin attempt")
             throw RuntimeException("Unauthorized")
         }
 
-        // 🔒 OPTIONAL: enforce ADMIN role (recommended)
         val roles = authentication.authorities.map { it.authority }
 
         if (!roles.contains("ROLE_ADMIN")) {
-            log.error("❌ Non-admin tried to mark payout as paid")
             throw RuntimeException("Forbidden")
         }
-
-        log.info("💰 Admin processing payout → id=$id")
 
         payoutService.markAsPaid(id)
 
@@ -83,7 +74,7 @@ class PayoutController(
     }
 
     // =====================================================
-    // ❌ ADMIN REJECT PAYOUT
+    // ❌ ADMIN REJECT
     // =====================================================
     @PostMapping("/{id}/reject")
     fun rejectPayout(

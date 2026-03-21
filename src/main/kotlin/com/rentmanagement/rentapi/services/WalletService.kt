@@ -7,7 +7,6 @@ import com.rentmanagement.rentapi.repository.LedgerEntryRepository
 import com.rentmanagement.rentapi.wallet.dto.WalletResponse
 import com.rentmanagement.rentapi.wallet.dto.WalletTransaction
 import org.springframework.stereotype.Service
-import java.math.BigDecimal
 import java.util.UUID
 
 @Service
@@ -19,10 +18,6 @@ class WalletService(
 
 ) {
 
-    // ================================
-    // GET WALLET
-    // ================================
-
     fun getWallet(propertyId: UUID): WalletResponse {
 
         val property = propertyRepository
@@ -31,66 +26,31 @@ class WalletService(
 
         val wallet = walletRepository.findByProperty(property)
             ?: walletRepository.save(
-                Wallet(
-                    property = property,
-                    balance = BigDecimal.ZERO
-                )
+                Wallet(property = property)
             )
+
+        val payoutSetupComplete =
+            !wallet.accountNumber.isNullOrBlank() ||
+                    !wallet.mpesaPhone.isNullOrBlank()
 
         return WalletResponse(
             balance = wallet.balance.toDouble(),
-            totalCollected = wallet.balance.toDouble()
+            totalCollected = wallet.balance.toDouble(),
+            payoutSetupComplete = payoutSetupComplete
         )
     }
-
-    // ================================
-    // WITHDRAW
-    // ================================
-
-    fun withdraw(propertyId: UUID, amount: BigDecimal): WalletResponse {
-
-        val property = propertyRepository
-            .findById(propertyId)
-            .orElseThrow { RuntimeException("Property not found") }
-
-        val wallet = walletRepository.findByProperty(property)
-            ?: throw RuntimeException("Wallet not found")
-
-        if (amount < BigDecimal("600")) {
-            throw RuntimeException("Minimum withdrawal is 600")
-        }
-
-        if (wallet.balance < amount) {
-            throw RuntimeException("Insufficient funds")
-        }
-
-        wallet.balance = wallet.balance.subtract(amount)
-
-        val saved = walletRepository.save(wallet)
-
-        return WalletResponse(
-            balance = saved.balance.toDouble(),
-            totalCollected = saved.balance.toDouble()
-        )
-    }
-
-    // ================================
-    // WALLET TRANSACTION HISTORY
-    // ================================
 
     fun getTransactions(propertyId: UUID): List<WalletTransaction> {
 
-        val entries = ledgerEntryRepository
-            .findWalletTransactions(propertyId)
+        val entries = ledgerEntryRepository.findWalletTransactions(propertyId)
 
         return entries.map {
-
             WalletTransaction(
                 id = it.id!!,
                 amount = it.amount,
                 entryType = it.entryType.name,
                 category = it.category?.name,
-                reference = it.reference, // ✅ use reference now
+                reference = it.reference,
                 createdAt = it.createdAt
             )
         }

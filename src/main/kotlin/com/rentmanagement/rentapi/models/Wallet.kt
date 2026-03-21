@@ -28,5 +28,14 @@ class Wallet(
     var autoPayoutEnabled: Boolean = false,
 
     @Column(nullable = false)
-    var adminApprovalEnabled: Boolean = true
+    var adminApprovalEnabled: Boolean = true,
+
+    // =========================
+    // 🔥 NEW FIELDS
+    // =========================
+    var bankName: String? = null,
+
+    var accountNumber: String? = null,
+
+    var mpesaPhone: String? = null
 )

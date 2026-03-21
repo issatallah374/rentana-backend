@@ -4,6 +4,7 @@ data class WalletResponse(
 
     val balance: Double,
 
-    val totalCollected: Double
+    val totalCollected: Double,
 
+    val payoutSetupComplete: Boolean
 )
