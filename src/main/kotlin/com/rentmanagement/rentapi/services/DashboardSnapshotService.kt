@@ -4,6 +4,7 @@ import com.rentmanagement.rentapi.models.DashboardSnapshot
 import com.rentmanagement.rentapi.repository.DashboardSnapshotRepository
 import com.rentmanagement.rentapi.repository.LedgerEntryRepository
 import com.rentmanagement.rentapi.repository.PropertyRepository
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -16,50 +17,41 @@ class DashboardSnapshotService(
     private val snapshotRepository: DashboardSnapshotRepository
 ) {
 
+    private val log = LoggerFactory.getLogger(DashboardSnapshotService::class.java)
+
     fun createMonthlySnapshots() {
 
         val now = LocalDate.now()
-
         val year = now.year
         val month = now.monthValue
 
+        log.info("📊 Creating dashboard snapshots → $month/$year")
+
         val properties = propertyRepository.findAll()
 
-        for (property in properties) {
+        properties.forEach { property ->
 
             val propertyId: UUID = property.id!!
 
-            // ✅ Check if snapshot already exists
-            val existingSnapshot =
-                snapshotRepository.findByPropertyIdAndYearAndMonth(
-                    propertyId,
-                    year,
-                    month
-                )
+            // ✅ Skip if already exists
+            val exists = snapshotRepository
+                .findByPropertyIdAndYearAndMonth(propertyId, year, month)
 
-            if (existingSnapshot != null) {
-                // Snapshot already exists → skip
-                continue
+            if (exists != null) {
+                log.debug("⏭️ Snapshot exists → property=$propertyId")
+                return@forEach
             }
 
-            val expected =
-                ledgerRepository.sumRentChargesForMonth(
-                    propertyId,
-                    year,
-                    month
-                )
+            // ✅ Calculate values from ledger
+            val expected = ledgerRepository
+                .sumRentChargesForMonth(propertyId, year, month)
 
-            val collected =
-                ledgerRepository.sumPaymentsForMonth(
-                    propertyId,
-                    year,
-                    month
-                )
+            val collected = ledgerRepository
+                .sumPaymentsForMonth(propertyId, year, month)
 
             val arrears = expected.subtract(collected)
 
             val snapshot = DashboardSnapshot(
-                id = UUID.randomUUID(),
                 propertyId = propertyId,
                 year = year,
                 month = month,
@@ -70,6 +62,8 @@ class DashboardSnapshotService(
             )
 
             snapshotRepository.save(snapshot)
+
+            log.info("✅ Snapshot saved → property=$propertyId")
         }
     }
 }

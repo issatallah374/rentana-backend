@@ -73,19 +73,24 @@
             })
         })
         .then(res => {
-            if (!res.ok) throw new Error("Login failed");
+            if (!res.ok) throw new Error();
             return res.json();
         })
         .then(data => {
 
-            // 🔑 SAVE TOKEN
+            if (!data.token) {
+                alert("❌ Invalid response from server");
+                return;
+            }
+
             localStorage.setItem("token", data.token);
 
-            // 🚀 GO TO DASHBOARD
+            // ✅ redirect
             window.location.href = "/admin/dashboard";
+
         })
         .catch(() => {
-            alert("❌ Invalid login");
+            alert("❌ Invalid email or password");
         });
     }
 

@@ -29,26 +29,22 @@
 
         button {
             padding: 6px 10px;
-            border: none;
             border-radius: 6px;
             cursor: pointer;
             margin: 2px;
+            border: none;
         }
 
         .paid { background: green; color: white; }
         .reject { background: red; color: white; }
 
         .pending { color: orange; }
-        .approved { color: lightgreen; }
+        .paid-status { color: lightgreen; }
         .rejected { color: red; }
 
         .disabled {
-            opacity: 0.5;
+            opacity: 0.4;
             pointer-events: none;
-        }
-
-        .loading {
-            color: #94a3b8;
         }
     </style>
 </head>
@@ -58,7 +54,7 @@
 <h1>💸 Payout Dashboard</h1>
 
 <h2>Platform Wallet</h2>
-<div id="wallet" class="loading">Loading...</div>
+<div id="wallet">Loading...</div>
 
 <hr>
 
@@ -84,7 +80,7 @@
     const token = localStorage.getItem("token");
 
     if (!token) {
-        alert("❌ No token found. Set token in localStorage.");
+        alert("❌ No token found. Please login again.");
     }
 
     // ================= WALLET =================
@@ -94,9 +90,6 @@
     .then(res => res.json())
     .then(data => {
         document.getElementById("wallet").innerText = "KES " + data.balance;
-    })
-    .catch(() => {
-        document.getElementById("wallet").innerText = "❌ Failed to load";
     });
 
     // ================= LOAD PAYOUTS =================
@@ -113,20 +106,36 @@
 
             data.forEach(p => {
 
-                let statusClass = p.status.toLowerCase();
+                let statusClass =
+                    p.status === "PAID" ? "paid-status" :
+                    p.status === "REJECTED" ? "rejected" :
+                    "pending";
 
-                let disableButtons = p.status !== "PENDING" ? "disabled" : "";
+                let disabled = p.status !== "PENDING" ? "disabled" : "";
 
                 let row = `
-                    <tr>
+                    <tr id="row-${p.id}">
                         <td>${p.id}</td>
                         <td>${p.propertyId}</td>
                         <td>KES ${p.amount}</td>
                         <td>${p.destination}</td>
-                        <td class="${statusClass}">${p.status}</td>
+
+                        <td id="status-${p.id}" class="${statusClass}">
+                            ${p.status}
+                        </td>
+
                         <td>
-                            <button class="paid ${disableButtons}" onclick="markPaid('${p.id}', this)">PAID</button>
-                            <button class="reject ${disableButtons}" onclick="reject('${p.id}', this)">REJECT</button>
+                            <button id="paid-${p.id}"
+                                class="paid ${disabled}"
+                                onclick="markPaid('${p.id}')">
+                                PAID
+                            </button>
+
+                            <button id="reject-${p.id}"
+                                class="reject ${disabled}"
+                                onclick="reject('${p.id}')">
+                                REJECT
+                            </button>
                         </td>
                     </tr>
                 `;
@@ -134,16 +143,13 @@
                 table.innerHTML += row;
             });
 
-        })
-        .catch(() => alert("❌ Failed to load payouts"));
+        });
     }
 
     // ================= MARK PAID =================
-    function markPaid(id, btn) {
+    function markPaid(id) {
 
         if (!confirm("Mark this payout as PAID?")) return;
-
-        btn.classList.add("disabled");
 
         fetch(BASE_URL + '/api/payouts/' + id + '/mark-paid', {
             method: 'POST',
@@ -151,24 +157,29 @@
         })
         .then(res => {
             if (!res.ok) throw new Error();
-            return res.text();
         })
         .then(() => {
-            alert("✅ Payout processed!");
-            loadPayouts();
+
+            // 🔥 UPDATE UI WITHOUT RELOADING
+
+            document.getElementById("status-" + id).innerText = "PAID";
+            document.getElementById("status-" + id).className = "paid-status";
+
+            document.getElementById("paid-" + id).classList.add("disabled");
+            document.getElementById("reject-" + id).classList.add("disabled");
+
+            alert("✅ Payout marked as PAID");
+
         })
         .catch(() => {
             alert("❌ Failed to process payout");
-            btn.classList.remove("disabled");
         });
     }
 
     // ================= REJECT =================
-    function reject(id, btn) {
+    function reject(id) {
 
         if (!confirm("Reject this payout?")) return;
-
-        btn.classList.add("disabled");
 
         fetch(BASE_URL + '/api/payouts/' + id + '/reject', {
             method: 'POST',
@@ -176,11 +187,22 @@
         })
         .then(res => {
             if (!res.ok) throw new Error();
-            loadPayouts();
+        })
+        .then(() => {
+
+            // 🔥 UPDATE UI WITHOUT RELOADING
+
+            document.getElementById("status-" + id).innerText = "REJECTED";
+            document.getElementById("status-" + id).className = "rejected";
+
+            document.getElementById("paid-" + id).classList.add("disabled");
+            document.getElementById("reject-" + id).classList.add("disabled");
+
+            alert("❌ Payout rejected");
+
         })
         .catch(() => {
             alert("❌ Failed to reject payout");
-            btn.classList.remove("disabled");
         });
     }
 

@@ -30,6 +30,7 @@ data class DashboardSnapshot(
     @Column(nullable = false)
     val arrears: BigDecimal,
 
-    @Column(name = "created_at")
+    // ✅ KEEP THIS — required for sorting, audit, analytics
+    @Column(name = "created_at", nullable = false)
     val createdAt: LocalDateTime = LocalDateTime.now()
 )
