@@ -1,5 +1,6 @@
 package com.rentmanagement.rentapi.services
 
+import com.rentmanagement.rentapi.exceptions.BadRequestException
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -25,12 +26,13 @@ class PayoutService(
 
         log.info("💸 Request payout → landlord=$landlordId property=$propertyId amount=$amount")
 
+        // ✅ VALIDATION
         if (amount <= BigDecimal.ZERO) {
-            throw RuntimeException("Invalid amount")
+            throw BadRequestException("Invalid amount")
         }
 
         if (amount < BigDecimal("600")) {
-            throw RuntimeException("Minimum withdrawal is 600")
+            throw BadRequestException("Minimum withdrawal is 600")
         }
 
         // ✅ OWNERSHIP CHECK
@@ -42,7 +44,7 @@ class PayoutService(
         ) ?: 0
 
         if (ownsProperty == 0) {
-            throw RuntimeException("Unauthorized")
+            throw BadRequestException("Unauthorized")
         }
 
         // ✅ BALANCE CHECK
@@ -53,7 +55,7 @@ class PayoutService(
         ) ?: BigDecimal.ZERO
 
         if (balance < amount) {
-            throw RuntimeException("Insufficient balance")
+            throw BadRequestException("Insufficient balance")
         }
 
         // ✅ GET PAYOUT METHOD
@@ -68,10 +70,10 @@ class PayoutService(
         val (method, destination) = when {
             !mpesa.isNullOrBlank() -> "MPESA" to mpesa
             !bank.isNullOrBlank() -> "BANK" to bank
-            else -> throw RuntimeException("Payout setup incomplete")
+            else -> throw BadRequestException("Payout setup incomplete")
         }
 
-        // ✅ PREVENT MULTIPLE PENDING REQUESTS
+        // ✅ PREVENT MULTIPLE REQUESTS
         val pending = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM payout_requests WHERE property_id = ? AND status = 'PENDING'",
             Int::class.java,
@@ -79,7 +81,7 @@ class PayoutService(
         ) ?: 0
 
         if (pending > 0) {
-            throw RuntimeException("Pending payout exists")
+            throw BadRequestException("Pending payout exists")
         }
 
         // ✅ INSERT REQUEST
@@ -119,13 +121,13 @@ class PayoutService(
         )
 
         if (payout["status"] != "PENDING") {
-            throw RuntimeException("Already processed")
+            throw BadRequestException("Already processed")
         }
 
         val propertyId = UUID.fromString(payout["property_id"].toString())
         val amount = BigDecimal(payout["amount"].toString())
 
-        // ✅ DEDUCT BALANCE SAFELY
+        // ✅ SAFE BALANCE DEDUCTION
         val updated = jdbcTemplate.update(
             """
             UPDATE wallets
@@ -139,7 +141,7 @@ class PayoutService(
         )
 
         if (updated == 0) {
-            throw RuntimeException("Balance issue")
+            throw BadRequestException("Balance issue")
         }
 
         // ✅ LEDGER ENTRY
@@ -192,7 +194,7 @@ class PayoutService(
         )
 
         if (updated == 0) {
-            throw RuntimeException("Not found or already processed")
+            throw BadRequestException("Not found or already processed")
         }
 
         log.info("✅ payout rejected → id=$payoutId")
