@@ -5,6 +5,10 @@ import com.rentmanagement.rentapi.wallet.dto.WalletTransaction
 import com.rentmanagement.rentapi.services.WalletService
 import com.rentmanagement.rentapi.repository.PropertyRepository
 import com.rentmanagement.rentapi.repository.WalletRepository
+import com.rentmanagement.rentapi.models.Wallet
+import org.slf4j.LoggerFactory
+import com.rentmanagement.rentapi.dto.PayoutSetupRequest
+
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
@@ -19,14 +23,13 @@ class WalletController(
 
 ) {
 
+    private val log = LoggerFactory.getLogger(WalletController::class.java)
+
     // ================================
     // 💰 GET WALLET
     // ================================
     @GetMapping("/{propertyId}/wallet")
-    fun getWallet(
-        @PathVariable propertyId: UUID
-    ): WalletResponse {
-
+    fun getWallet(@PathVariable propertyId: UUID): WalletResponse {
         return walletService.getWallet(propertyId)
     }
 
@@ -34,20 +37,17 @@ class WalletController(
     // 📒 TRANSACTIONS
     // ================================
     @GetMapping("/{propertyId}/wallet/transactions")
-    fun transactions(
-        @PathVariable propertyId: UUID
-    ): List<WalletTransaction> {
-
+    fun transactions(@PathVariable propertyId: UUID): List<WalletTransaction> {
         return walletService.getTransactions(propertyId)
     }
 
     // ================================
-    // 🔒 SAVE PAYOUT DETAILS (SECURE)
+    // 🔒 SAVE PAYOUT DETAILS
     // ================================
     @PostMapping("/{propertyId}/wallet/payout/setup")
     fun savePayoutDetails(
         @PathVariable propertyId: UUID,
-        @RequestBody data: Map<String, String>,
+        @RequestBody request: PayoutSetupRequest,
         authentication: Authentication
     ): String {
 
@@ -57,27 +57,32 @@ class WalletController(
             .orElseThrow { RuntimeException("Property not found") }
 
         if (property.landlord.id != landlordId) {
+            log.warn("❌ Unauthorized payout setup attempt")
             throw RuntimeException("Unauthorized")
         }
 
         val wallet = walletRepository.findByProperty(property)
-            ?: walletRepository.save(
-                com.rentmanagement.rentapi.models.Wallet(property = property)
-            )
+            ?: walletRepository.save(Wallet(property = property))
 
-        val bankName = data["bankName"]?.trim()
-        val accountNumber = data["accountNumber"]?.trim()
-        val mpesaPhone = data["mpesaPhone"]?.trim()
-
-        if (accountNumber.isNullOrBlank() && mpesaPhone.isNullOrBlank()) {
-            throw RuntimeException("Provide bank or M-Pesa")
+        // validation
+        if (request.accountNumber.isNullOrBlank() && request.mpesaPhone.isNullOrBlank()) {
+            throw RuntimeException("Provide bank account or M-Pesa phone")
         }
 
-        wallet.bankName = bankName
-        wallet.accountNumber = accountNumber
-        wallet.mpesaPhone = mpesaPhone
+        // optional: normalize phone
+        val phone = request.mpesaPhone?.replace("\\s".toRegex(), "")
+
+        wallet.bankName = request.bankName?.trim()
+        wallet.accountNumber = request.accountNumber?.trim()
+        wallet.mpesaPhone = phone
 
         walletRepository.save(wallet)
+
+        // ✅ mark property as configured
+        property.payoutSetupComplete = true
+        propertyRepository.save(property)
+
+        log.info("✅ Payout setup saved for property=$propertyId")
 
         return "Payout details saved"
     }

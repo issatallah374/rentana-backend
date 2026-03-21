@@ -25,16 +25,18 @@ data class Property(
     @Column(nullable = false)
     val country: String,
 
-    // ADD THIS FIELD (required for repository query)
     @Column(name = "account_prefix", unique = true, nullable = false)
     var accountPrefix: String,
 
-    // landlord relationship
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "landlord_id", nullable = false)
     @JsonIgnore
     val landlord: User,
 
     @Column(name = "created_at", nullable = false)
-    val createdAt: LocalDateTime = LocalDateTime.now()
+    val createdAt: LocalDateTime = LocalDateTime.now(),
+
+    // ✅ ADD THIS
+    @Column(name = "payout_setup_complete")
+    var payoutSetupComplete: Boolean = false
 )
