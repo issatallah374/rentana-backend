@@ -8,7 +8,6 @@ data class WalletResponse(
 
     val payoutSetupComplete: Boolean,
 
-    // 🔥 ADD THESE (THIS FIXES EVERYTHING)
     val mpesaPhone: String?,
 
     val accountNumber: String?,

@@ -9,6 +9,9 @@ import java.util.UUID
 
 interface LedgerEntryRepository : JpaRepository<LedgerEntry, UUID> {
 
+    // ===============================
+    // 📒 WALLET TRANSACTIONS
+    // ===============================
     @Query(
         """
         SELECT l
@@ -21,8 +24,24 @@ interface LedgerEntryRepository : JpaRepository<LedgerEntry, UUID> {
         @Param("propertyId") propertyId: UUID
     ): List<LedgerEntry>
 
+    // ===============================
+    // 💰 TOTAL COLLECTED (ALL TIME)
+    // ===============================
+    @Query(
+        """
+        SELECT COALESCE(SUM(l.amount),0)
+        FROM LedgerEntry l
+        WHERE l.property.id = :propertyId
+        AND l.entryType = 'CREDIT'
+        """
+    )
+    fun getTotalCollected(
+        @Param("propertyId") propertyId: UUID
+    ): BigDecimal
 
-    // TOTAL RENT CHARGED (DEBIT)
+    // ===============================
+    // 📅 MONTHLY RENT CHARGED
+    // ===============================
     @Query(
         """
         SELECT COALESCE(SUM(l.amount),0)
@@ -39,8 +58,9 @@ interface LedgerEntryRepository : JpaRepository<LedgerEntry, UUID> {
         @Param("month") month: Int
     ): BigDecimal
 
-
-    // TOTAL PAYMENTS RECEIVED (CREDIT)
+    // ===============================
+    // 📅 MONTHLY PAYMENTS
+    // ===============================
     @Query(
         """
         SELECT COALESCE(SUM(l.amount),0)

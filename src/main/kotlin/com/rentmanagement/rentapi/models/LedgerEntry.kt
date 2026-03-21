@@ -16,7 +16,7 @@ data class LedgerEntry(
     val id: UUID? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "property_id")
+    @JoinColumn(name = "property_id", nullable = false)
     var property: Property? = null,
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -25,7 +25,7 @@ data class LedgerEntry(
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
-    @Column(name = "entry_type", columnDefinition = "ledger_entry_type")
+    @Column(name = "entry_type", columnDefinition = "ledger_entry_type", nullable = false)
     val entryType: LedgerEntryType,
 
     @Enumerated(EnumType.STRING)
@@ -42,6 +42,6 @@ data class LedgerEntry(
     @Column(name = "reference_id")
     val referenceId: UUID? = null,
 
-    @Column(name = "created_at")
+    @Column(name = "created_at", nullable = false)
     val createdAt: LocalDateTime = LocalDateTime.now()
 )

@@ -6,7 +6,6 @@ import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.repository.LedgerEntryRepository
 import com.rentmanagement.rentapi.wallet.dto.WalletResponse
 import com.rentmanagement.rentapi.wallet.dto.WalletTransaction
-import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.util.UUID
@@ -16,13 +15,12 @@ class WalletService(
 
     private val walletRepository: WalletRepository,
     private val propertyRepository: PropertyRepository,
-    private val ledgerEntryRepository: LedgerEntryRepository,
-    private val jdbcTemplate: JdbcTemplate // ✅ added
+    private val ledgerEntryRepository: LedgerEntryRepository
 
 ) {
 
     // ===============================
-    // 💰 GET WALLET (LEDGER-BASED)
+    // 💰 GET WALLET (CORRECT)
     // ===============================
     fun getWallet(propertyId: UUID): WalletResponse {
 
@@ -31,37 +29,22 @@ class WalletService(
             .orElseThrow { RuntimeException("Property not found") }
 
         val wallet = walletRepository.findByProperty(property)
-            ?: walletRepository.save(
-                Wallet(property = property)
-            )
+            ?: walletRepository.save(Wallet(property = property))
 
-        // 🔥 TRUE BALANCE FROM LEDGER
-        val balance = jdbcTemplate.queryForObject(
-            """
-            SELECT COALESCE(SUM(
-                CASE
-                    WHEN entry_type = 'CREDIT' THEN amount
-                    WHEN entry_type = 'DEBIT' AND category = 'WITHDRAWAL' THEN -amount
-                END
-            ),0)
-            FROM ledger_entries
-            WHERE property_id = ?
-            """.trimIndent(),
-            BigDecimal::class.java,
-            propertyId
-        ) ?: BigDecimal.ZERO
+        // ✅ TRUE BALANCE (ledger-based)
+        val entries = ledgerEntryRepository.findWalletTransactions(propertyId)
 
-        // 🔥 TOTAL COLLECTED (ONLY CREDITS)
-        val totalCollected = jdbcTemplate.queryForObject(
-            """
-            SELECT COALESCE(SUM(amount),0)
-            FROM ledger_entries
-            WHERE property_id = ?
-            AND entry_type = 'CREDIT'
-            """.trimIndent(),
-            BigDecimal::class.java,
-            propertyId
-        ) ?: BigDecimal.ZERO
+        val balance = entries.fold(BigDecimal.ZERO) { acc, entry ->
+            when (entry.entryType.name) {
+                "CREDIT" -> acc + entry.amount
+                "DEBIT" -> acc - entry.amount
+                else -> acc
+            }
+        }
+
+        // ✅ TOTAL COLLECTED (CORRECT)
+        val totalCollected =
+            ledgerEntryRepository.getTotalCollected(propertyId)
 
         val payoutSetupComplete =
             !wallet.accountNumber.isNullOrBlank() ||
@@ -71,8 +54,6 @@ class WalletService(
             balance = balance.toDouble(),
             totalCollected = totalCollected.toDouble(),
             payoutSetupComplete = payoutSetupComplete,
-
-            // ✅ payout details (needed by Android)
             mpesaPhone = wallet.mpesaPhone,
             accountNumber = wallet.accountNumber,
             bankName = wallet.bankName
