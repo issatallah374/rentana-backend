@@ -6,7 +6,9 @@ import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.repository.LedgerEntryRepository
 import com.rentmanagement.rentapi.wallet.dto.WalletResponse
 import com.rentmanagement.rentapi.wallet.dto.WalletTransaction
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
+import java.math.BigDecimal
 import java.util.UUID
 
 @Service
@@ -14,12 +16,13 @@ class WalletService(
 
     private val walletRepository: WalletRepository,
     private val propertyRepository: PropertyRepository,
-    private val ledgerEntryRepository: LedgerEntryRepository
+    private val ledgerEntryRepository: LedgerEntryRepository,
+    private val jdbcTemplate: JdbcTemplate // ✅ added
 
 ) {
 
     // ===============================
-    // 💰 GET WALLET (UPDATED)
+    // 💰 GET WALLET (LEDGER-BASED)
     // ===============================
     fun getWallet(propertyId: UUID): WalletResponse {
 
@@ -32,16 +35,44 @@ class WalletService(
                 Wallet(property = property)
             )
 
+        // 🔥 TRUE BALANCE FROM LEDGER
+        val balance = jdbcTemplate.queryForObject(
+            """
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN entry_type = 'CREDIT' THEN amount
+                    WHEN entry_type = 'DEBIT' AND category = 'WITHDRAWAL' THEN -amount
+                END
+            ),0)
+            FROM ledger_entries
+            WHERE property_id = ?
+            """.trimIndent(),
+            BigDecimal::class.java,
+            propertyId
+        ) ?: BigDecimal.ZERO
+
+        // 🔥 TOTAL COLLECTED (ONLY CREDITS)
+        val totalCollected = jdbcTemplate.queryForObject(
+            """
+            SELECT COALESCE(SUM(amount),0)
+            FROM ledger_entries
+            WHERE property_id = ?
+            AND entry_type = 'CREDIT'
+            """.trimIndent(),
+            BigDecimal::class.java,
+            propertyId
+        ) ?: BigDecimal.ZERO
+
         val payoutSetupComplete =
             !wallet.accountNumber.isNullOrBlank() ||
                     !wallet.mpesaPhone.isNullOrBlank()
 
         return WalletResponse(
-            balance = wallet.balance.toDouble(),
-            totalCollected = wallet.balance.toDouble(),
+            balance = balance.toDouble(),
+            totalCollected = totalCollected.toDouble(),
             payoutSetupComplete = payoutSetupComplete,
 
-            // 🔥 FIX: return payout details to Android
+            // ✅ payout details (needed by Android)
             mpesaPhone = wallet.mpesaPhone,
             accountNumber = wallet.accountNumber,
             bankName = wallet.bankName

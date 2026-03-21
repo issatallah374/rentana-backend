@@ -18,6 +18,7 @@ class PayoutService(
     // =====================================================
     // 💸 REQUEST PAYOUT
     // =====================================================
+    @Transactional
     fun requestPayout(
         landlordId: UUID,
         propertyId: UUID,
@@ -31,7 +32,6 @@ class PayoutService(
             throw BadRequestException("Enter a valid amount")
         }
 
-        // 🔥 MINIMUM = 3 KES
         if (amount < BigDecimal("3")) {
             throw BadRequestException("Minimum withdrawal is KES 3")
         }
@@ -48,9 +48,18 @@ class PayoutService(
             throw BadRequestException("You are not authorized for this property")
         }
 
-        // ✅ BALANCE CHECK
+        // 🔥 CORRECT BALANCE FROM LEDGER (SOURCE OF TRUTH)
         val balance = jdbcTemplate.queryForObject(
-            "SELECT balance FROM wallets WHERE property_id = ?",
+            """
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN entry_type = 'CREDIT' THEN amount
+                    WHEN entry_type = 'DEBIT' AND category = 'WITHDRAWAL' THEN -amount
+                END
+            ),0)
+            FROM ledger_entries
+            WHERE property_id = ?
+            """.trimIndent(),
             BigDecimal::class.java,
             propertyId
         ) ?: BigDecimal.ZERO
@@ -59,9 +68,8 @@ class PayoutService(
             throw BadRequestException("Insufficient balance")
         }
 
-        // 🔥 KEEP SMALL BALANCE (optional safety)
+        // 🔥 SAFETY BUFFER
         val minimumRemaining = BigDecimal("1")
-
         if (balance - amount < minimumRemaining) {
             throw BadRequestException("Leave at least KES 1 in wallet")
         }
@@ -135,23 +143,7 @@ class PayoutService(
         val propertyId = UUID.fromString(payout["property_id"].toString())
         val amount = BigDecimal(payout["amount"].toString())
 
-        val updated = jdbcTemplate.update(
-            """
-            UPDATE wallets
-            SET balance = balance - ?
-            WHERE property_id = ?
-            AND balance >= ?
-            """.trimIndent(),
-            amount,
-            propertyId,
-            amount
-        )
-
-        if (updated == 0) {
-            throw BadRequestException("Balance update failed")
-        }
-
-        // ✅ LEDGER ENTRY
+        // ✅ WRITE TO LEDGER (SOURCE OF TRUTH)
         jdbcTemplate.update(
             """
             INSERT INTO ledger_entries(
@@ -162,7 +154,7 @@ class PayoutService(
                 reference,
                 created_at
             )
-            VALUES (?, 'DEBIT', 'PAYOUT', ?, ?, now())
+            VALUES (?, 'DEBIT', 'WITHDRAWAL', ?, ?, now())
             """.trimIndent(),
             propertyId,
             amount,
