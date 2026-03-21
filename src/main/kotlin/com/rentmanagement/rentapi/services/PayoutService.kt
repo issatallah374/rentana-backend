@@ -28,11 +28,12 @@ class PayoutService(
 
         // ✅ VALIDATION
         if (amount <= BigDecimal.ZERO) {
-            throw BadRequestException("Invalid amount")
+            throw BadRequestException("Enter a valid amount")
         }
 
-        if (amount < BigDecimal("600")) {
-            throw BadRequestException("Minimum withdrawal is 600")
+        // 🔥 MINIMUM = 3 KES
+        if (amount < BigDecimal("3")) {
+            throw BadRequestException("Minimum withdrawal is KES 3")
         }
 
         // ✅ OWNERSHIP CHECK
@@ -44,7 +45,7 @@ class PayoutService(
         ) ?: 0
 
         if (ownsProperty == 0) {
-            throw BadRequestException("Unauthorized")
+            throw BadRequestException("You are not authorized for this property")
         }
 
         // ✅ BALANCE CHECK
@@ -54,8 +55,15 @@ class PayoutService(
             propertyId
         ) ?: BigDecimal.ZERO
 
-        if (balance < amount) {
+        if (amount > balance) {
             throw BadRequestException("Insufficient balance")
+        }
+
+        // 🔥 KEEP SMALL BALANCE (optional safety)
+        val minimumRemaining = BigDecimal("1")
+
+        if (balance - amount < minimumRemaining) {
+            throw BadRequestException("Leave at least KES 1 in wallet")
         }
 
         // ✅ GET PAYOUT METHOD
@@ -70,7 +78,7 @@ class PayoutService(
         val (method, destination) = when {
             !mpesa.isNullOrBlank() -> "MPESA" to mpesa
             !bank.isNullOrBlank() -> "BANK" to bank
-            else -> throw BadRequestException("Payout setup incomplete")
+            else -> throw BadRequestException("Please complete payout setup first")
         }
 
         // ✅ PREVENT MULTIPLE REQUESTS
@@ -81,7 +89,7 @@ class PayoutService(
         ) ?: 0
 
         if (pending > 0) {
-            throw BadRequestException("Pending payout exists")
+            throw BadRequestException("You already have a pending payout")
         }
 
         // ✅ INSERT REQUEST
@@ -121,13 +129,12 @@ class PayoutService(
         )
 
         if (payout["status"] != "PENDING") {
-            throw BadRequestException("Already processed")
+            throw BadRequestException("Payout already processed")
         }
 
         val propertyId = UUID.fromString(payout["property_id"].toString())
         val amount = BigDecimal(payout["amount"].toString())
 
-        // ✅ SAFE BALANCE DEDUCTION
         val updated = jdbcTemplate.update(
             """
             UPDATE wallets
@@ -141,7 +148,7 @@ class PayoutService(
         )
 
         if (updated == 0) {
-            throw BadRequestException("Balance issue")
+            throw BadRequestException("Balance update failed")
         }
 
         // ✅ LEDGER ENTRY
@@ -194,7 +201,7 @@ class PayoutService(
         )
 
         if (updated == 0) {
-            throw BadRequestException("Not found or already processed")
+            throw BadRequestException("Payout not found or already processed")
         }
 
         log.info("✅ payout rejected → id=$payoutId")
