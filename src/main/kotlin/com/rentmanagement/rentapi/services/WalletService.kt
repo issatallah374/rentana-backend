@@ -18,6 +18,9 @@ class WalletService(
 
 ) {
 
+    // ===============================
+    // 💰 GET WALLET (UPDATED)
+    // ===============================
     fun getWallet(propertyId: UUID): WalletResponse {
 
         val property = propertyRepository
@@ -36,10 +39,18 @@ class WalletService(
         return WalletResponse(
             balance = wallet.balance.toDouble(),
             totalCollected = wallet.balance.toDouble(),
-            payoutSetupComplete = payoutSetupComplete
+            payoutSetupComplete = payoutSetupComplete,
+
+            // 🔥 FIX: return payout details to Android
+            mpesaPhone = wallet.mpesaPhone,
+            accountNumber = wallet.accountNumber,
+            bankName = wallet.bankName
         )
     }
 
+    // ===============================
+    // 📒 TRANSACTIONS
+    // ===============================
     fun getTransactions(propertyId: UUID): List<WalletTransaction> {
 
         val entries = ledgerEntryRepository.findWalletTransactions(propertyId)

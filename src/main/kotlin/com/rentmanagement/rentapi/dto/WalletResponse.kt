@@ -6,5 +6,12 @@ data class WalletResponse(
 
     val totalCollected: Double,
 
-    val payoutSetupComplete: Boolean
+    val payoutSetupComplete: Boolean,
+
+    // 🔥 ADD THESE (THIS FIXES EVERYTHING)
+    val mpesaPhone: String?,
+
+    val accountNumber: String?,
+
+    val bankName: String?
 )

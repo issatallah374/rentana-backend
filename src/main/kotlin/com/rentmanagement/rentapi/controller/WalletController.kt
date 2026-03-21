@@ -6,9 +6,9 @@ import com.rentmanagement.rentapi.services.WalletService
 import com.rentmanagement.rentapi.repository.PropertyRepository
 import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.models.Wallet
-import org.slf4j.LoggerFactory
 import com.rentmanagement.rentapi.dto.PayoutSetupRequest
-
+import org.slf4j.LoggerFactory
+import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
@@ -48,8 +48,12 @@ class WalletController(
     fun savePayoutDetails(
         @PathVariable propertyId: UUID,
         @RequestBody request: PayoutSetupRequest,
-        authentication: Authentication
-    ): String {
+        authentication: Authentication?
+    ): ResponseEntity<String> {
+
+        if (authentication == null || authentication.name.isNullOrBlank()) {
+            throw RuntimeException("Unauthorized")
+        }
 
         val landlordId = UUID.fromString(authentication.name)
 
@@ -64,13 +68,15 @@ class WalletController(
         val wallet = walletRepository.findByProperty(property)
             ?: walletRepository.save(Wallet(property = property))
 
-        // validation
+        // ✅ validation
         if (request.accountNumber.isNullOrBlank() && request.mpesaPhone.isNullOrBlank()) {
             throw RuntimeException("Provide bank account or M-Pesa phone")
         }
 
-        // optional: normalize phone
-        val phone = request.mpesaPhone?.replace("\\s".toRegex(), "")
+        // ✅ normalize phone
+        val phone = request.mpesaPhone
+            ?.replace("\\s".toRegex(), "")
+            ?.replaceFirst("^0".toRegex(), "254")
 
         wallet.bankName = request.bankName?.trim()
         wallet.accountNumber = request.accountNumber?.trim()
@@ -78,12 +84,12 @@ class WalletController(
 
         walletRepository.save(wallet)
 
-        // ✅ mark property as configured
+        // optional: keep property flag
         property.payoutSetupComplete = true
         propertyRepository.save(property)
 
         log.info("✅ Payout setup saved for property=$propertyId")
 
-        return "Payout details saved"
+        return ResponseEntity.ok("Payout details saved")
     }
 }
