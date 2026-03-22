@@ -19,7 +19,7 @@ class WalletService(
 
     private val propertyRepository: PropertyRepository,
     private val ledgerEntryRepository: LedgerEntryRepository,
-    private val walletRepository: WalletRepository // ✅ ADDED
+    private val walletRepository: WalletRepository
 
 ) {
 
@@ -42,10 +42,12 @@ class WalletService(
                 .orElseThrow { RuntimeException("Property not found") }
 
             // =====================================================
-            // ✅ ENSURE WALLET EXISTS (CRITICAL FIX)
+            // 🔥 CRITICAL FIX (USE ID NOT ENTITY)
             // =====================================================
-            val wallet = walletRepository.findByProperty(property)
-                ?: walletRepository.save(Wallet(property = property))
+            val wallet = walletRepository.findByPropertyId(propertyId)
+                ?: walletRepository.save(
+                    Wallet(property = property)
+                )
 
             val mpesaPhone = wallet.mpesaPhone
             val accountNumber = wallet.accountNumber
@@ -68,7 +70,7 @@ class WalletService(
             log.info("📒 Ledger entries = ${entries.size}")
 
             // =====================================================
-            // 💰 BALANCE CALCULATION (STRICT + SAFE)
+            // 💰 BALANCE CALCULATION (STRICT + CORRECT)
             // =====================================================
             val rawBalance = entries.fold(BigDecimal.ZERO) { acc, entry ->
 
@@ -77,15 +79,15 @@ class WalletService(
                 val category = entry.category?.name
 
                 when {
-                    // ✅ RENT PAYMENTS (INCOME)
+                    // ✅ REAL MONEY IN
                     type == "CREDIT" && category == "RENT_PAYMENT" ->
                         acc.add(amount)
 
-                    // ✅ PAYOUTS (EXPENSE)
+                    // ✅ REAL MONEY OUT
                     type == "DEBIT" && category == "PAYOUT" ->
                         acc.subtract(amount)
 
-                    // ❌ Ignore charges + noise
+                    // ❌ IGNORE RENT_CHARGE + noise
                     else -> acc
                 }
             }
@@ -132,7 +134,7 @@ class WalletService(
     }
 
     // =====================================================
-    // 📒 GET TRANSACTIONS (CLEAN)
+    // 📒 GET TRANSACTIONS
     // =====================================================
     fun getTransactions(propertyId: UUID): List<WalletTransactionResponse> {
 
