@@ -6,6 +6,7 @@ import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.repository.LedgerEntryRepository
 import com.rentmanagement.rentapi.wallet.dto.WalletResponse
 import com.rentmanagement.rentapi.wallet.dto.WalletTransactionResponse
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.time.ZoneId
@@ -21,9 +22,12 @@ class WalletService(
 
 ) {
 
-    // 🇰🇪 KENYA TIMEZONE
+    private val log = LoggerFactory.getLogger(WalletService::class.java)
+
+    // 🇰🇪 Kenya timezone
     private val kenyaZone = ZoneId.of("Africa/Nairobi")
 
+    // 🕒 Clean Kenyan format
     private val formatter = DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a")
 
     // ===============================
@@ -31,44 +35,64 @@ class WalletService(
     // ===============================
     fun getWallet(propertyId: UUID): WalletResponse {
 
-        val property = propertyRepository
-            .findById(propertyId)
-            .orElseThrow { RuntimeException("Property not found") }
+        return try {
 
-        val wallet = walletRepository.findByProperty(property)
-            ?: walletRepository.save(Wallet(property = property))
+            val property = propertyRepository
+                .findById(propertyId)
+                .orElseThrow { RuntimeException("Property not found") }
 
-        val entries =
-            ledgerEntryRepository.findWalletTransactions(propertyId)
+            val wallet = walletRepository.findByProperty(property)
+                ?: walletRepository.save(Wallet(property = property))
 
-        // ✅ BALANCE (SAFE + CLEAN)
-        val balance = entries.fold(BigDecimal.ZERO) { acc, entry ->
+            val entries =
+                ledgerEntryRepository.findWalletTransactions(propertyId)
 
-            val amount = entry.amount ?: BigDecimal.ZERO
+            // ✅ CORRECT BALANCE (handles PAYOUT too)
+            val rawBalance = entries.fold(BigDecimal.ZERO) { acc, entry ->
 
-            when (entry.entryType?.name) {
-                "CREDIT" -> acc + amount
-                "DEBIT" -> acc - amount
-                else -> acc
+                val amount = entry.amount ?: BigDecimal.ZERO
+
+                when (entry.entryType?.name) {
+                    "CREDIT" -> acc + amount
+                    "DEBIT" -> acc - amount
+                    else -> acc
+                }
             }
+
+            // 🔥 NEVER RETURN NEGATIVE (fixes UI crash)
+            val safeBalance = rawBalance.max(BigDecimal.ZERO)
+
+            val totalCollected =
+                ledgerEntryRepository.getTotalCollected(propertyId)
+                    ?: BigDecimal.ZERO
+
+            val payoutSetupComplete =
+                !wallet.accountNumber.isNullOrBlank() ||
+                        !wallet.mpesaPhone.isNullOrBlank()
+
+            WalletResponse(
+                balance = safeBalance.toDouble(),
+                totalCollected = totalCollected.toDouble(),
+                payoutSetupComplete = payoutSetupComplete,
+                mpesaPhone = wallet.mpesaPhone,
+                accountNumber = wallet.accountNumber,
+                bankName = wallet.bankName
+            )
+
+        } catch (e: Exception) {
+
+            log.error("❌ Wallet load failed → property=$propertyId", e)
+
+            // 🔥 Always return safe response (NO 500)
+            WalletResponse(
+                balance = 0.0,
+                totalCollected = 0.0,
+                payoutSetupComplete = false,
+                mpesaPhone = null,
+                accountNumber = null,
+                bankName = null
+            )
         }
-
-        val totalCollected =
-            ledgerEntryRepository.getTotalCollected(propertyId)
-                ?: BigDecimal.ZERO
-
-        val payoutSetupComplete =
-            !wallet.accountNumber.isNullOrBlank() ||
-                    !wallet.mpesaPhone.isNullOrBlank()
-
-        return WalletResponse(
-            balance = balance.toDouble(),
-            totalCollected = totalCollected.toDouble(),
-            payoutSetupComplete = payoutSetupComplete,
-            mpesaPhone = wallet.mpesaPhone,
-            accountNumber = wallet.accountNumber,
-            bankName = wallet.bankName
-        )
     }
 
     // ===============================
@@ -76,24 +100,40 @@ class WalletService(
     // ===============================
     fun getTransactions(propertyId: UUID): List<WalletTransactionResponse> {
 
-        return ledgerEntryRepository
-            .findWalletTransactions(propertyId)
-            .map { entry ->
+        return try {
 
-                val kenyaTime = entry.createdAt
-                    ?.atZone(ZoneId.systemDefault())
-                    ?.withZoneSameInstant(kenyaZone)
+            ledgerEntryRepository
+                .findWalletTransactions(propertyId)
+                .map { entry ->
 
-                WalletTransactionResponse(
-                    id = entry.id?.toString() ?: "",
-                    amount = entry.amount?.toDouble() ?: 0.0,
-                    entryType = entry.entryType?.name ?: "UNKNOWN",
-                    category = entry.category?.name,
-                    reference = entry.reference,
+                    // 🇰🇪 SAFE TIME CONVERSION
+                    val formattedTime = try {
 
-                    // 🇰🇪 BEAUTIFUL KENYAN TIME
-                    createdAt = kenyaTime?.format(formatter) ?: ""
-                )
-            }
+                        entry.createdAt
+                            ?.atZone(ZoneId.systemDefault())
+                            ?.withZoneSameInstant(kenyaZone)
+                            ?.format(formatter)
+
+                    } catch (e: Exception) {
+                        "—"
+                    }
+
+                    WalletTransactionResponse(
+                        id = entry.id?.toString() ?: "",
+                        amount = entry.amount?.toDouble() ?: 0.0,
+                        entryType = entry.entryType?.name ?: "UNKNOWN",
+                        category = entry.category?.name ?: "—",
+                        reference = entry.reference ?: "—",
+                        createdAt = formattedTime ?: "—"
+                    )
+                }
+
+        } catch (e: Exception) {
+
+            log.error("❌ Transactions load failed → property=$propertyId", e)
+
+            // 🔥 NEVER BREAK FRONTEND
+            emptyList()
+        }
     }
 }

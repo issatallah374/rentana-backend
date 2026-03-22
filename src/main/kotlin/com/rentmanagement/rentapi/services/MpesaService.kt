@@ -38,9 +38,7 @@ class MpesaService(
                 amount = BigDecimal(amount),
                 landlordId = UUID.fromString(landlordId)
             )
-
             log.info("🔥 STK TRIGGERED")
-
         } catch (e: Exception) {
             log.error("❌ STK FAILED", e)
         }
@@ -50,9 +48,7 @@ class MpesaService(
     // 🔵 STK CALLBACK
     // =========================================================
     fun processPaymentCallback(payload: Map<String, Any>) {
-
         try {
-            log.info("🔥 ===== STK CALLBACK START =====")
 
             val callback = payload["Body"]
                 ?.let { it as? Map<*, *> }
@@ -75,7 +71,7 @@ class MpesaService(
             var phone: String? = null
             var accountRaw: String? = null
 
-            for (item in items) {
+            items.forEach { item ->
                 when (item["Name"]) {
                     "Amount" -> amount = BigDecimal((item["Value"] as Number).toString())
                     "MpesaReceiptNumber" -> reference = item["Value"].toString()
@@ -93,7 +89,7 @@ class MpesaService(
                 ?.replace("-", "")
                 ?: return log.error("❌ Missing account")
 
-            log.info("💰 STK → $safeAmount | $safeAccount | $safeReference")
+            log.info("💰 STK → amount=$safeAmount account=$safeAccount ref=$safeReference")
 
             handlePayment(safeReference, safeAmount, phone, safeAccount, payload)
 
@@ -106,9 +102,7 @@ class MpesaService(
     // 🟢 C2B PAYMENTS
     // =========================================================
     fun processC2BPayment(payload: Map<String, Any>) {
-
         try {
-            log.info("🔥 ===== C2B PAYMENT START =====")
 
             val reference = payload["TransID"]?.toString()
                 ?: return log.error("❌ Missing TransID")
@@ -124,7 +118,7 @@ class MpesaService(
                 ?.replace("-", "")
                 ?: return log.error("❌ Missing account")
 
-            log.info("💰 C2B → $amount | $safeAccount | $reference")
+            log.info("💰 C2B → amount=$amount account=$safeAccount ref=$reference")
 
             handlePayment(reference, amount, phone, safeAccount, payload)
 
@@ -134,7 +128,7 @@ class MpesaService(
     }
 
     // =========================================================
-    // 💰 CORE PAYMENT HANDLER (🔥 FULLY FIXED)
+    // 💰 CORE HANDLER (🔥 BULLETPROOF)
     // =========================================================
     private fun handlePayment(
         reference: String,
@@ -146,15 +140,15 @@ class MpesaService(
 
         try {
 
-            // 🛑 DUPLICATE CHECK
+            // 🛑 HARD DUPLICATE PROTECTION (LEDGER LEVEL)
             val exists = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM mpesa_transactions WHERE transaction_code = ?",
+                "SELECT COUNT(*) FROM ledger_entries WHERE reference = ?",
                 Int::class.java,
                 reference
             ) ?: 0
 
             if (exists > 0) {
-                log.warn("⚠️ Duplicate ignored → $reference")
+                log.warn("⚠️ Duplicate PAYMENT ignored → $reference")
                 return
             }
 
@@ -182,8 +176,6 @@ class MpesaService(
                 now
             )
 
-            log.info("💾 Saved MPESA transaction")
-
             // 🔍 FIND UNIT
             val unit = unitRepository.findByReferenceNumberIgnoreCase(account)
                 ?: return log.error("❌ Unit not found → $account")
@@ -191,10 +183,13 @@ class MpesaService(
             val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
                 ?: return log.error("❌ No active tenancy")
 
-            log.info("🏠 Unit=${unit.id} Tenancy=${tenancy.id}")
+            val propertyId = unit.property?.id
+                ?: return log.error("❌ Property missing for unit")
+
+            log.info("🏠 property=$propertyId tenancy=${tenancy.id}")
 
             // =====================================================
-            // 🔥 INSERT INTO LEDGER (THIS FIXES YOUR WALLET = 0 BUG)
+            // 🔥 LEDGER ENTRY (SOURCE OF TRUTH)
             // =====================================================
             jdbcTemplate.update(
                 """
@@ -211,7 +206,7 @@ class MpesaService(
                 )
                 VALUES (?, ?, 'CREDIT', 'RENT_PAYMENT', ?, ?, ?, ?, ?)
                 """,
-                unit.property.id,
+                propertyId,
                 tenancy.id,
                 amount,
                 reference,
@@ -220,23 +215,21 @@ class MpesaService(
                 now
             )
 
-            log.info("📒 Ledger entry created")
-
-            // ✅ MARK PROCESSED
+            // ✅ MARK MPESA AS PROCESSED
             jdbcTemplate.update(
                 "UPDATE mpesa_transactions SET processed = true WHERE transaction_code = ?",
                 reference
             )
 
-            log.info("🎉 PAYMENT FULLY PROCESSED")
+            log.info("🎉 PAYMENT SUCCESS → $reference")
 
         } catch (e: Exception) {
-            log.error("❌ HANDLE PAYMENT FAILED", e)
+            log.error("❌ HANDLE PAYMENT FAILED → ref=$reference", e)
         }
     }
 
     // =========================================================
-    // 🟢 SUBSCRIPTION CALLBACK (KENYA TIME FIXED)
+    // 🟢 SUBSCRIPTION CALLBACK
     // =========================================================
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
@@ -266,10 +259,10 @@ class MpesaService(
             var amount: BigDecimal? = null
             var reference: String? = null
 
-            for (item in items) {
-                when (item["Name"]) {
-                    "Amount" -> amount = BigDecimal((item["Value"] as Number).toString())
-                    "MpesaReceiptNumber" -> reference = item["Value"].toString()
+            items.forEach {
+                when (it["Name"]) {
+                    "Amount" -> amount = BigDecimal((it["Value"] as Number).toString())
+                    "MpesaReceiptNumber" -> reference = it["Value"].toString()
                 }
             }
 

@@ -57,14 +57,14 @@ class PayoutService(
         }
 
         // ===============================
-        // 💰 WALLET BALANCE (🔥 FIXED LOGIC)
+        // 💰 CORRECT WALLET BALANCE (🔥 FIXED FULLY)
         // ===============================
         val balance = jdbcTemplate.queryForObject(
             """
             SELECT COALESCE(SUM(
                 CASE
                     WHEN entry_type = 'CREDIT' THEN amount
-                    WHEN entry_type = 'DEBIT' AND category = 'PAYOUT' THEN -amount
+                    WHEN entry_type = 'DEBIT' AND category IN ('PAYOUT', 'WITHDRAWAL') THEN -amount
                     ELSE 0
                 END
             ), 0)
@@ -77,7 +77,12 @@ class PayoutService(
 
         log.info("💰 Current balance → $balance")
 
-        // ❌ INSUFFICIENT BALANCE
+        // ❌ NO MONEY
+        if (balance <= BigDecimal.ZERO) {
+            throw BadRequestException("No funds available")
+        }
+
+        // ❌ INSUFFICIENT
         if (amount > balance) {
             throw BadRequestException("Insufficient balance")
         }
@@ -123,7 +128,7 @@ class PayoutService(
         }
 
         // ===============================
-        // 💾 INSERT PAYOUT REQUEST (KENYA TIME)
+        // 💾 INSERT PAYOUT REQUEST
         // ===============================
         val now = LocalDateTime.now(kenyaZone)
 
@@ -184,7 +189,7 @@ class PayoutService(
         val now = LocalDateTime.now(kenyaZone)
 
         // ===============================
-        // ✅ WRITE LEDGER (🔥 FIXED CATEGORY + TIME)
+        // ✅ WRITE LEDGER (🔥 CRITICAL FIX)
         // ===============================
         jdbcTemplate.update(
             """
