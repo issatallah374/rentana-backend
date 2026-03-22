@@ -42,7 +42,7 @@ class WalletController(
     }
 
     // ================================
-    // 🔒 SAVE PAYOUT DETAILS
+    // 🔒 SAVE PAYOUT DETAILS (FINAL FIX)
     // ================================
     @PostMapping("/{propertyId}/wallet/payout/setup")
     fun savePayoutDetails(
@@ -65,30 +65,40 @@ class WalletController(
             throw RuntimeException("Unauthorized")
         }
 
-        val wallet = walletRepository.findByProperty(property)
+        // =====================================================
+        // 🔥 CRITICAL FIX (USE PROPERTY ID, NOT ENTITY)
+        // =====================================================
+        val wallet = walletRepository.findByPropertyId(propertyId)
             ?: walletRepository.save(Wallet(property = property))
 
-        // ✅ validation
+        // =====================================================
+        // ✅ VALIDATION
+        // =====================================================
         if (request.accountNumber.isNullOrBlank() && request.mpesaPhone.isNullOrBlank()) {
             throw RuntimeException("Provide bank account or M-Pesa phone")
         }
 
-        // ✅ normalize phone
+        // =====================================================
+        // ✅ NORMALIZE PHONE
+        // =====================================================
         val phone = request.mpesaPhone
             ?.replace("\\s".toRegex(), "")
             ?.replaceFirst("^0".toRegex(), "254")
 
+        // =====================================================
+        // ✅ SAVE DATA
+        // =====================================================
         wallet.bankName = request.bankName?.trim()
         wallet.accountNumber = request.accountNumber?.trim()
         wallet.mpesaPhone = phone
 
         walletRepository.save(wallet)
 
-        // optional: keep property flag
+        // (optional flag - safe to keep)
         property.payoutSetupComplete = true
         propertyRepository.save(property)
 
-        log.info("✅ Payout setup saved for property=$propertyId")
+        log.info("✅ Payout setup saved → property=$propertyId")
 
         return ResponseEntity.ok("Payout details saved")
     }

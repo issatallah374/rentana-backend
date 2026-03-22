@@ -20,8 +20,9 @@ class PayoutController(
 
     private val log = LoggerFactory.getLogger(PayoutController::class.java)
 
+    // =====================================================
     // 💸 REQUEST PAYOUT
-// =====================================================
+    // =====================================================
     @PostMapping("/request")
     fun requestPayout(
         @RequestParam propertyId: UUID,
@@ -33,7 +34,6 @@ class PayoutController(
             throw RuntimeException("Unauthorized")
         }
 
-        // ✅ MINIMUM CHECK (FAST FAIL)
         if (amount <= BigDecimal.ZERO) {
             throw RuntimeException("Enter a valid amount")
         }
@@ -52,7 +52,10 @@ class PayoutController(
             throw RuntimeException("Unauthorized")
         }
 
-        val wallet = walletRepository.findByProperty(property)
+        // =====================================================
+        // 🔥 FIXED (USE PROPERTY ID, NOT ENTITY)
+        // =====================================================
+        val wallet = walletRepository.findByPropertyId(propertyId)
             ?: throw RuntimeException("Wallet not found")
 
         // 🔒 enforce payout setup
@@ -74,8 +77,6 @@ class PayoutController(
     // =====================================================
     // 🔥 ADMIN MARK AS PAID
     // =====================================================
-    // 🔥 ADMIN MARK AS PAID
-// =====================================================
     @PostMapping("/{id}/mark-paid")
     fun markPaid(
         @PathVariable id: UUID,
@@ -102,13 +103,9 @@ class PayoutController(
         return ResponseEntity.ok("Marked as paid")
     }
 
-
     // =====================================================
     // ❌ ADMIN REJECT
     // =====================================================
-    // =====================================================
-// ❌ ADMIN REJECT
-// =====================================================
     @PostMapping("/{id}/reject")
     fun rejectPayout(
         @PathVariable id: UUID,
