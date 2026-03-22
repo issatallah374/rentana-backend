@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.util.*
 
 @Service
@@ -25,13 +26,13 @@ class MpesaService(
 
     private val log = LoggerFactory.getLogger(MpesaService::class.java)
     private val objectMapper = ObjectMapper()
+    private val kenyaZone = ZoneId.of("Africa/Nairobi")
 
     // =========================================================
     // 🔥 STK INIT
     // =========================================================
     fun initiateStkPush(phone: String, amount: Double, landlordId: String) {
         try {
-
             mpesaStkService.stkPush(
                 phone = phone,
                 amount = BigDecimal(amount),
@@ -46,12 +47,11 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🔵 STK CALLBACK (APP PAYMENTS)
+    // 🔵 STK CALLBACK
     // =========================================================
     fun processPaymentCallback(payload: Map<String, Any>) {
 
         try {
-
             log.info("🔥 ===== STK CALLBACK START =====")
 
             val callback = payload["Body"]
@@ -103,14 +103,12 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🟢 C2B PAYMENTS (PAYBILL)
+    // 🟢 C2B PAYMENTS
     // =========================================================
     fun processC2BPayment(payload: Map<String, Any>) {
 
         try {
-
             log.info("🔥 ===== C2B PAYMENT START =====")
-            log.info("📦 Payload: $payload")
 
             val reference = payload["TransID"]?.toString()
                 ?: return log.error("❌ Missing TransID")
@@ -136,7 +134,7 @@ class MpesaService(
     }
 
     // =========================================================
-    // 💰 CORE HANDLER (USED BY BOTH STK + C2B)
+    // 💰 CORE PAYMENT HANDLER (🔥 FULLY FIXED)
     // =========================================================
     private fun handlePayment(
         reference: String,
@@ -160,20 +158,31 @@ class MpesaService(
                 return
             }
 
-            // 💾 SAVE RAW
+            val now = LocalDateTime.now(kenyaZone)
+
+            // 💾 SAVE RAW TRANSACTION
             jdbcTemplate.update(
                 """
-                INSERT INTO mpesa_transactions(transaction_code, phone_number, account_reference, amount, raw_payload, processed)
-                VALUES (?, ?, ?, ?, ?::jsonb, false)
+                INSERT INTO mpesa_transactions(
+                    transaction_code,
+                    phone_number,
+                    account_reference,
+                    amount,
+                    raw_payload,
+                    processed,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?::jsonb, false, ?)
                 """,
                 reference,
                 phone,
                 account,
                 amount,
-                objectMapper.writeValueAsString(payload)
+                objectMapper.writeValueAsString(payload),
+                now
             )
 
-            log.info("💾 Saved transaction")
+            log.info("💾 Saved MPESA transaction")
 
             // 🔍 FIND UNIT
             val unit = unitRepository.findByReferenceNumberIgnoreCase(account)
@@ -184,17 +193,34 @@ class MpesaService(
 
             log.info("🏠 Unit=${unit.id} Tenancy=${tenancy.id}")
 
-            // 💰 DB ENGINE
-            jdbcTemplate.execute(
-                "SELECT process_payment(?::uuid, ?::numeric, ?)"
-            ) { ps ->
-                ps.setObject(1, tenancy.id)
-                ps.setBigDecimal(2, amount)
-                ps.setString(3, reference)
-                ps.execute()
-            }
+            // =====================================================
+            // 🔥 INSERT INTO LEDGER (THIS FIXES YOUR WALLET = 0 BUG)
+            // =====================================================
+            jdbcTemplate.update(
+                """
+                INSERT INTO ledger_entries (
+                    property_id,
+                    tenancy_id,
+                    entry_type,
+                    category,
+                    amount,
+                    reference,
+                    entry_month,
+                    entry_year,
+                    created_at
+                )
+                VALUES (?, ?, 'CREDIT', 'RENT_PAYMENT', ?, ?, ?, ?, ?)
+                """,
+                unit.property.id,
+                tenancy.id,
+                amount,
+                reference,
+                now.monthValue,
+                now.year,
+                now
+            )
 
-            log.info("🎉 PAYMENT SUCCESS")
+            log.info("📒 Ledger entry created")
 
             // ✅ MARK PROCESSED
             jdbcTemplate.update(
@@ -202,13 +228,15 @@ class MpesaService(
                 reference
             )
 
+            log.info("🎉 PAYMENT FULLY PROCESSED")
+
         } catch (e: Exception) {
             log.error("❌ HANDLE PAYMENT FAILED", e)
         }
     }
 
     // =========================================================
-    // 🟢 SUBSCRIPTION CALLBACK
+    // 🟢 SUBSCRIPTION CALLBACK (KENYA TIME FIXED)
     // =========================================================
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
@@ -222,14 +250,12 @@ class MpesaService(
             val checkoutId = callback["CheckoutRequestID"]?.toString()
 
             if (resultCode != 0) {
-
                 checkoutId?.let {
                     stkRequestRepository.findByCheckoutRequestId(it)?.apply {
                         status = "FAILED"
                         stkRequestRepository.save(this)
                     }
                 }
-
                 return
             }
 
@@ -261,6 +287,8 @@ class MpesaService(
             val plan = subscriptionPlanRepository.findMatchingPlan(safeAmount)
                 ?: throw RuntimeException("Plan not found")
 
+            val now = LocalDateTime.now(kenyaZone)
+
             platformTransactionRepository.save(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
@@ -280,9 +308,6 @@ class MpesaService(
                 landlord.id
             )
 
-            val start = LocalDateTime.now()
-            val end = start.plusMonths(1)
-
             jdbcTemplate.update(
                 """
                 INSERT INTO subscriptions (
@@ -298,8 +323,8 @@ class MpesaService(
                 UUID.randomUUID(),
                 landlord.id,
                 plan.id,
-                start,
-                end
+                now,
+                now.plusMonths(1)
             )
 
             stkRequest.status = "SUCCESS"

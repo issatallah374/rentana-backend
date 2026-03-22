@@ -6,6 +6,8 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
+import java.time.LocalDateTime
+import java.time.ZoneId
 import java.util.*
 
 @Service
@@ -15,9 +17,11 @@ class PayoutService(
 
     private val log = LoggerFactory.getLogger(PayoutService::class.java)
 
+    private val kenyaZone = ZoneId.of("Africa/Nairobi")
+
     // =====================================================
     // 💸 REQUEST PAYOUT
-// =====================================================
+    // =====================================================
     @Transactional
     fun requestPayout(
         landlordId: UUID,
@@ -53,30 +57,32 @@ class PayoutService(
         }
 
         // ===============================
-        // 💰 WALLET BALANCE (LEDGER = SOURCE OF TRUTH)
+        // 💰 WALLET BALANCE (🔥 FIXED LOGIC)
         // ===============================
         val balance = jdbcTemplate.queryForObject(
             """
-        SELECT COALESCE(SUM(
-            CASE
-                WHEN entry_type = 'CREDIT' THEN amount
-                WHEN entry_type = 'DEBIT' AND category = 'WITHDRAWAL' THEN -amount
-                ELSE 0
-            END
-        ), 0)
-        FROM ledger_entries
-        WHERE property_id = ?
-        """.trimIndent(),
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN entry_type = 'CREDIT' THEN amount
+                    WHEN entry_type = 'DEBIT' AND category = 'PAYOUT' THEN -amount
+                    ELSE 0
+                END
+            ), 0)
+            FROM ledger_entries
+            WHERE property_id = ?
+            """.trimIndent(),
             BigDecimal::class.java,
             propertyId
         ) ?: BigDecimal.ZERO
+
+        log.info("💰 Current balance → $balance")
 
         // ❌ INSUFFICIENT BALANCE
         if (amount > balance) {
             throw BadRequestException("Insufficient balance")
         }
 
-        // 🔒 SAFETY BUFFER (leave KES 1)
+        // 🔒 SAFETY BUFFER
         val minimumRemaining = BigDecimal("1")
         if (balance.subtract(amount) < minimumRemaining) {
             throw BadRequestException("Leave at least KES 1 in wallet")
@@ -84,6 +90,7 @@ class PayoutService(
 
         // ===============================
         // ✅ GET PAYOUT METHOD
+        // ===============================
         val wallet = jdbcTemplate.queryForMap(
             "SELECT mpesa_phone, account_number FROM wallets WHERE property_id = ?",
             propertyId
@@ -103,10 +110,10 @@ class PayoutService(
         // ===============================
         val pending = jdbcTemplate.queryForObject(
             """
-        SELECT COUNT(*) 
-        FROM payout_requests 
-        WHERE property_id = ? AND status = 'PENDING'
-        """.trimIndent(),
+            SELECT COUNT(*) 
+            FROM payout_requests 
+            WHERE property_id = ? AND status = 'PENDING'
+            """.trimIndent(),
             Int::class.java,
             propertyId
         ) ?: 0
@@ -116,28 +123,31 @@ class PayoutService(
         }
 
         // ===============================
-        // 💾 INSERT PAYOUT REQUEST
+        // 💾 INSERT PAYOUT REQUEST (KENYA TIME)
         // ===============================
+        val now = LocalDateTime.now(kenyaZone)
+
         jdbcTemplate.update(
             """
-        INSERT INTO payout_requests (
-            id,
-            landlord_id,
-            property_id,
-            amount,
-            method,
-            destination,
-            status,
-            created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NOW())
-        """.trimIndent(),
+            INSERT INTO payout_requests (
+                id,
+                landlord_id,
+                property_id,
+                amount,
+                method,
+                destination,
+                status,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
+            """.trimIndent(),
             UUID.randomUUID(),
             landlordId,
             propertyId,
             amount,
             method,
-            destination
+            destination,
+            now
         )
 
         log.info("✅ payout requested → $method → $destination")
@@ -145,7 +155,7 @@ class PayoutService(
 
     // =====================================================
     // 🔥 ADMIN MARK AS PAID
-// =====================================================
+    // =====================================================
     @Transactional
     fun markAsPaid(
         payoutId: UUID,
@@ -167,48 +177,50 @@ class PayoutService(
         val propertyId = UUID.fromString(payout["property_id"].toString())
         val amount = BigDecimal(payout["amount"].toString())
 
-        // 🔥 VALIDATE NATIONAL ID
         if (nationalId.isBlank()) {
             throw BadRequestException("National ID is required")
         }
 
-        // ✅ WRITE LEDGER (FIXED)
-        val now = java.time.LocalDateTime.now()
-        val month = now.monthValue
-        val year = now.year
+        val now = LocalDateTime.now(kenyaZone)
 
+        // ===============================
+        // ✅ WRITE LEDGER (🔥 FIXED CATEGORY + TIME)
+        // ===============================
         jdbcTemplate.update(
             """
-    INSERT INTO ledger_entries(
-        property_id,
-        entry_type,
-        category,
-        amount,
-        entry_month,
-        entry_year,
-        reference,
-        created_at
-    )
-    VALUES (?, 'DEBIT', 'WITHDRAWAL', ?, ?, ?, ?, ?)
-    """.trimIndent(),
+            INSERT INTO ledger_entries(
+                property_id,
+                entry_type,
+                category,
+                amount,
+                entry_month,
+                entry_year,
+                reference,
+                created_at
+            )
+            VALUES (?, 'DEBIT', 'PAYOUT', ?, ?, ?, ?, ?)
+            """.trimIndent(),
             propertyId,
             amount,
-            month,
-            year,
+            now.monthValue,
+            now.year,
             "PAYOUT:$payoutId",
             now
         )
 
-// ✅ UPDATE PAYOUT
+        // ===============================
+        // ✅ UPDATE PAYOUT
+        // ===============================
         jdbcTemplate.update(
             """
-    UPDATE payout_requests
-    SET status = 'PAID',
-        processed_at = now(),
-        processed_by = ?,
-        national_id = ?
-    WHERE id = ?
-    """.trimIndent(),
+            UPDATE payout_requests
+            SET status = 'PAID',
+                processed_at = ?,
+                processed_by = ?,
+                national_id = ?
+            WHERE id = ?
+            """.trimIndent(),
+            now,
             adminId,
             nationalId,
             payoutId
@@ -216,12 +228,10 @@ class PayoutService(
 
         log.info("✅ payout marked as PAID → id=$payoutId")
     }
+
     // =====================================================
     // ❌ REJECT PAYOUT
     // =====================================================
-    // =====================================================
-// ❌ REJECT PAYOUT
-// =====================================================
     @Transactional
     fun rejectPayout(payoutId: UUID) {
 
@@ -236,13 +246,16 @@ class PayoutService(
             throw BadRequestException("Payout already processed")
         }
 
+        val now = LocalDateTime.now(kenyaZone)
+
         jdbcTemplate.update(
             """
-        UPDATE payout_requests
-        SET status = 'REJECTED',
-            processed_at = now()
-        WHERE id = ?
-        """.trimIndent(),
+            UPDATE payout_requests
+            SET status = 'REJECTED',
+                processed_at = ?
+            WHERE id = ?
+            """.trimIndent(),
+            now,
             payoutId
         )
 

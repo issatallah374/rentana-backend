@@ -8,6 +8,7 @@ import com.rentmanagement.rentapi.wallet.dto.WalletResponse
 import com.rentmanagement.rentapi.wallet.dto.WalletTransactionResponse
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
@@ -20,6 +21,11 @@ class WalletService(
 
 ) {
 
+    // 🇰🇪 KENYA TIMEZONE
+    private val kenyaZone = ZoneId.of("Africa/Nairobi")
+
+    private val formatter = DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a")
+
     // ===============================
     // 💰 GET WALLET
     // ===============================
@@ -29,15 +35,13 @@ class WalletService(
             .findById(propertyId)
             .orElseThrow { RuntimeException("Property not found") }
 
-        // Ensure wallet exists
         val wallet = walletRepository.findByProperty(property)
             ?: walletRepository.save(Wallet(property = property))
 
-        // Fetch ledger entries
         val entries =
             ledgerEntryRepository.findWalletTransactions(propertyId)
 
-        // ✅ SAFE BALANCE CALCULATION
+        // ✅ BALANCE (SAFE + CLEAN)
         val balance = entries.fold(BigDecimal.ZERO) { acc, entry ->
 
             val amount = entry.amount ?: BigDecimal.ZERO
@@ -49,7 +53,6 @@ class WalletService(
             }
         }
 
-        // ✅ TOTAL COLLECTED (SAFE)
         val totalCollected =
             ledgerEntryRepository.getTotalCollected(propertyId)
                 ?: BigDecimal.ZERO
@@ -71,14 +74,15 @@ class WalletService(
     // ===============================
     // 📒 GET TRANSACTIONS
     // ===============================
-
     fun getTransactions(propertyId: UUID): List<WalletTransactionResponse> {
-
-        val formatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
 
         return ledgerEntryRepository
             .findWalletTransactions(propertyId)
             .map { entry ->
+
+                val kenyaTime = entry.createdAt
+                    ?.atZone(ZoneId.systemDefault())
+                    ?.withZoneSameInstant(kenyaZone)
 
                 WalletTransactionResponse(
                     id = entry.id?.toString() ?: "",
@@ -86,9 +90,9 @@ class WalletService(
                     entryType = entry.entryType?.name ?: "UNKNOWN",
                     category = entry.category?.name,
                     reference = entry.reference,
-                    createdAt = entry.createdAt
-                        ?.format(formatter)
-                        ?: ""
+
+                    // 🇰🇪 BEAUTIFUL KENYAN TIME
+                    createdAt = kenyaTime?.format(formatter) ?: ""
                 )
             }
     }
