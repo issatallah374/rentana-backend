@@ -2,7 +2,6 @@ package com.rentmanagement.rentapi.services
 
 import com.rentmanagement.rentapi.models.StkRequest
 import com.rentmanagement.rentapi.repository.StkRequestRepository
-import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.*
 import org.springframework.stereotype.Service
@@ -17,8 +16,6 @@ class MpesaStkService(
     private val restTemplate: RestTemplate,
     private val stkRequestRepository: StkRequestRepository
 ) {
-
-    private val log = LoggerFactory.getLogger(MpesaStkService::class.java)
 
     @Value("\${mpesa.consumerKey}")
     lateinit var consumerKey: String
@@ -40,58 +37,41 @@ class MpesaStkService(
     // =========================================================
     private fun getAccessToken(): String {
 
-        return try {
+        val credentials = "$consumerKey:$consumerSecret"
+        val encoded = Base64.getEncoder().encodeToString(credentials.toByteArray())
 
-            log.info("🔐 Requesting M-Pesa access token...")
+        val headers = HttpHeaders()
+        headers.set("Authorization", "Basic $encoded")
 
-            val credentials = "$consumerKey:$consumerSecret"
-            val encoded = Base64.getEncoder().encodeToString(credentials.toByteArray())
+        val request = HttpEntity<String>(headers)
 
-            val headers = HttpHeaders()
-            headers.set("Authorization", "Basic $encoded")
+        val response = restTemplate.exchange(
+            "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+            HttpMethod.GET,
+            request,
+            Map::class.java
+        )
 
-            val request = HttpEntity<String>(headers)
+        val body = response.body ?: throw RuntimeException("No token response")
 
-            val response = restTemplate.exchange(
-                "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
-                HttpMethod.GET,
-                request,
-                Map::class.java
-            )
-
-            log.info("📥 TOKEN RESPONSE → ${response.body}")
-
-            val token = response.body?.get("access_token")?.toString()
-                ?: throw RuntimeException("Access token missing")
-
-            log.info("✅ Access token acquired")
-
-            token
-
-        } catch (e: Exception) {
-            log.error("❌ TOKEN REQUEST FAILED", e)
-            throw e
-        }
+        return body["access_token"]?.toString()
+            ?: throw RuntimeException("Access token missing")
     }
 
     // =========================================================
-    // 📞 PHONE NORMALIZATION
+    // 📞 PHONE NORMALIZATION (CRITICAL 🔥)
     // =========================================================
     private fun normalizePhone(phone: String): String {
-        val normalized = when {
+        return when {
             phone.startsWith("0") -> "254" + phone.substring(1)
             phone.startsWith("+254") -> phone.substring(1)
             phone.startsWith("254") -> phone
             else -> throw RuntimeException("Invalid phone format")
         }
-
-        log.info("📱 Phone normalized → $phone → $normalized")
-
-        return normalized
     }
 
     // =========================================================
-    // 📲 STK PUSH (FULL DEBUG)
+    // 📲 STK PUSH (PRODUCTION READY)
     // =========================================================
     fun stkPush(
         phone: String,
@@ -101,10 +81,8 @@ class MpesaStkService(
 
         try {
 
-            log.info("🚀 ===== STK PUSH START =====")
-            log.info("📌 Input → phone=$phone amount=$amount landlord=$landlordId")
-
             val formattedPhone = normalizePhone(phone)
+
             val token = getAccessToken()
 
             val timestamp = SimpleDateFormat("yyyyMMddHHmmss").format(Date())
@@ -115,12 +93,16 @@ class MpesaStkService(
 
             val accountRef = "SUB_${landlordId.toString().take(6)}"
 
+            val headers = HttpHeaders()
+            headers.contentType = MediaType.APPLICATION_JSON
+            headers.setBearerAuth(token)
+
             val payload = mapOf(
                 "BusinessShortCode" to shortcode,
                 "Password" to password,
                 "Timestamp" to timestamp,
                 "TransactionType" to "CustomerPayBillOnline",
-                "Amount" to amount.toInt(),
+                "Amount" to amount.toInt(), // 🔥 FIXED
                 "PartyA" to formattedPhone,
                 "PartyB" to shortcode,
                 "PhoneNumber" to formattedPhone,
@@ -129,12 +111,8 @@ class MpesaStkService(
                 "TransactionDesc" to "Rentana Subscription"
             )
 
-            log.info("📤 STK REQUEST → $payload")
-            log.info("🌐 CALLBACK URL → $callbackUrl")
-
-            val headers = HttpHeaders()
-            headers.contentType = MediaType.APPLICATION_JSON
-            headers.setBearerAuth(token)
+            println("🔥 CALLBACK URL: $callbackUrl")
+            println("📤 STK PAYLOAD: $payload")
 
             val request = HttpEntity(payload, headers)
 
@@ -144,15 +122,16 @@ class MpesaStkService(
                 Map::class.java
             )
 
-            log.info("📥 STK RESPONSE → ${response.body}")
-
-            val body = response.body ?: throw RuntimeException("No response")
+            val body = response.body ?: throw RuntimeException("No response from Safaricom")
 
             val checkoutId = body["CheckoutRequestID"]?.toString()
                 ?: throw RuntimeException("Missing CheckoutRequestID")
 
             val merchantId = body["MerchantRequestID"]?.toString()
 
+            // =====================================================
+            // ✅ SAVE STK REQUEST
+            // =====================================================
             stkRequestRepository.save(
                 StkRequest(
                     checkoutRequestId = checkoutId,
@@ -164,12 +143,12 @@ class MpesaStkService(
                 )
             )
 
-            log.info("✅ STK SAVED → checkoutId=$checkoutId")
+            println("✅ STK SAVED → $checkoutId")
 
             return body
 
         } catch (e: Exception) {
-            log.error("❌ STK PUSH FAILED", e)
+            println("❌ STK ERROR: ${e.message}")
             throw e
         }
     }
