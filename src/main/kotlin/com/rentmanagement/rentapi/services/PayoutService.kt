@@ -172,34 +172,43 @@ class PayoutService(
             throw BadRequestException("National ID is required")
         }
 
-        // ✅ WRITE LEDGER
+        // ✅ WRITE LEDGER (FIXED)
+        val now = java.time.LocalDateTime.now()
+        val month = now.monthValue
+        val year = now.year
+
         jdbcTemplate.update(
             """
-        INSERT INTO ledger_entries(
-            property_id,
-            entry_type,
-            category,
-            amount,
-            reference,
-            created_at
-        )
-        VALUES (?, 'DEBIT', 'WITHDRAWAL', ?, ?, now())
-        """.trimIndent(),
+    INSERT INTO ledger_entries(
+        property_id,
+        entry_type,
+        category,
+        amount,
+        entry_month,
+        entry_year,
+        reference,
+        created_at
+    )
+    VALUES (?, 'DEBIT', 'WITHDRAWAL', ?, ?, ?, ?, ?)
+    """.trimIndent(),
             propertyId,
             amount,
-            "PAYOUT:$payoutId"
+            month,
+            year,
+            "PAYOUT:$payoutId",
+            now
         )
 
-        // ✅ UPDATE PAYOUT (🔥 FIXED HERE)
+// ✅ UPDATE PAYOUT
         jdbcTemplate.update(
             """
-        UPDATE payout_requests
-        SET status = 'PAID',
-            processed_at = now(),
-            processed_by = ?,
-            national_id = ?
-        WHERE id = ?
-        """.trimIndent(),
+    UPDATE payout_requests
+    SET status = 'PAID',
+        processed_at = now(),
+        processed_by = ?,
+        national_id = ?
+    WHERE id = ?
+    """.trimIndent(),
             adminId,
             nationalId,
             payoutId
