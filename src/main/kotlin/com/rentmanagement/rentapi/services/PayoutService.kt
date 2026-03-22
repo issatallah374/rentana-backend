@@ -159,8 +159,8 @@ class PayoutService(
     }
 
     // =====================================================
-    // 🔥 ADMIN MARK AS PAID
-    // =====================================================
+// 🔥 ADMIN MARK AS PAID (SECURE VERSION)
+// =====================================================
     @Transactional
     fun markAsPaid(
         payoutId: UUID,
@@ -169,6 +169,10 @@ class PayoutService(
     ) {
 
         log.info("🔥 Mark payout as PAID → id=$payoutId admin=$adminId")
+
+        if (nationalId.isBlank()) {
+            throw BadRequestException("National ID is required")
+        }
 
         val payout = jdbcTemplate.queryForMap(
             "SELECT * FROM payout_requests WHERE id = ? FOR UPDATE",
@@ -180,31 +184,46 @@ class PayoutService(
         }
 
         val propertyId = UUID.fromString(payout["property_id"].toString())
+        val landlordId = UUID.fromString(payout["landlord_id"].toString())
         val amount = BigDecimal(payout["amount"].toString())
 
-        if (nationalId.isBlank()) {
-            throw BadRequestException("National ID is required")
+        // =====================================================
+        // 🔐 VERIFY NATIONAL ID (🔥 CORE SECURITY FIX)
+        // =====================================================
+        val nationalIdHash = jdbcTemplate.queryForObject(
+            "SELECT national_id_hash FROM users WHERE id = ?",
+            String::class.java,
+            landlordId
+        ) ?: throw BadRequestException("User has no National ID set")
+
+        val encoder = org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
+
+        val isValid = encoder.matches(nationalId, nationalIdHash)
+
+        if (!isValid) {
+            log.warn("❌ INVALID NATIONAL ID → payout=$payoutId landlord=$landlordId")
+            throw BadRequestException("Invalid National ID")
         }
 
         val now = LocalDateTime.now(kenyaZone)
 
-        // ===============================
-        // ✅ WRITE LEDGER (🔥 CRITICAL FIX)
-        // ===============================
+        // =====================================================
+        // ✅ WRITE LEDGER (SOURCE OF TRUTH)
+        // =====================================================
         jdbcTemplate.update(
             """
-            INSERT INTO ledger_entries(
-                property_id,
-                entry_type,
-                category,
-                amount,
-                entry_month,
-                entry_year,
-                reference,
-                created_at
-            )
-            VALUES (?, 'DEBIT', 'PAYOUT', ?, ?, ?, ?, ?)
-            """.trimIndent(),
+        INSERT INTO ledger_entries(
+            property_id,
+            entry_type,
+            category,
+            amount,
+            entry_month,
+            entry_year,
+            reference,
+            created_at
+        )
+        VALUES (?, 'DEBIT', 'PAYOUT', ?, ?, ?, ?, ?)
+        """.trimIndent(),
             propertyId,
             amount,
             now.monthValue,
@@ -213,30 +232,31 @@ class PayoutService(
             now
         )
 
-        // ===============================
-        // ✅ UPDATE PAYOUT
-        // ===============================
+        // =====================================================
+        // ✅ UPDATE PAYOUT (DO NOT STORE RAW ID 🔥)
+        // =====================================================
         jdbcTemplate.update(
             """
-            UPDATE payout_requests
-            SET status = 'PAID',
-                processed_at = ?,
-                processed_by = ?,
-                national_id = ?
-            WHERE id = ?
-            """.trimIndent(),
+        UPDATE payout_requests
+        SET status = 'PAID',
+            processed_at = ?,
+            processed_by = ?,
+            national_id = ?
+        WHERE id = ?
+        """.trimIndent(),
             now,
             adminId,
-            nationalId,
+            "VERIFIED", // 🔥 NEVER store real ID
             payoutId
         )
 
-        log.info("✅ payout marked as PAID → id=$payoutId")
+        log.info("✅ payout marked as PAID → VERIFIED → id=$payoutId")
     }
 
+
     // =====================================================
-    // ❌ REJECT PAYOUT
-    // =====================================================
+// ❌ REJECT PAYOUT (UNCHANGED BUT CLEAN)
+// =====================================================
     @Transactional
     fun rejectPayout(payoutId: UUID) {
 
@@ -255,15 +275,14 @@ class PayoutService(
 
         jdbcTemplate.update(
             """
-            UPDATE payout_requests
-            SET status = 'REJECTED',
-                processed_at = ?
-            WHERE id = ?
-            """.trimIndent(),
+        UPDATE payout_requests
+        SET status = 'REJECTED',
+            processed_at = ?
+        WHERE id = ?
+        """.trimIndent(),
             now,
             payoutId
         )
 
         log.info("✅ payout rejected → id=$payoutId")
-    }
-}
+    }}

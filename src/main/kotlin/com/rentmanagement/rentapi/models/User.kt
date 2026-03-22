@@ -38,12 +38,14 @@ data class User(
     var isActive: Boolean = true,
 
     @Column(name = "created_at", nullable = false)
-    var createdAt: LocalDateTime = LocalDateTime.now()
+    var createdAt: LocalDateTime = LocalDateTime.now(),
+
+    // 🔐 NEW FIELD (SECURE)
+    @Column(name = "national_id_hash")
+    var nationalIdHash: String? = null
+
 ) {
 
-    // =========================
-    // 🔧 AUTO NORMALIZE BEFORE SAVE
-    // =========================
     @PrePersist
     @PreUpdate
     fun normalizePhone() {

@@ -46,31 +46,42 @@
             opacity: 0.4;
             pointer-events: none;
         }
+
+        .small {
+            font-size: 12px;
+            color: #94a3b8;
+        }
     </style>
 </head>
 
 <body>
 
-<h1>💸 Payout Dashboard</h1>
+<h1>💸 Admin Payout Dashboard</h1>
 
-<h2>Platform Wallet</h2>
+<h2>💰 Platform Wallet</h2>
 <div id="wallet">Loading...</div>
 
 <hr>
 
-<h2>Payout Requests</h2>
+<h2>📊 All Payout Requests</h2>
 
 <table>
     <thead>
     <tr>
         <th>ID</th>
         <th>Property</th>
+        <th>Landlord</th>
         <th>Amount</th>
+        <th>Method</th>
         <th>Destination</th>
         <th>Status</th>
+        <th>Created</th>
+        <th>Processed</th>
+        <th>National ID</th>
         <th>Action</th>
     </tr>
     </thead>
+
     <tbody id="payouts"></tbody>
 </table>
 
@@ -85,12 +96,13 @@
 
     // ================= WALLET =================
     function loadWallet() {
-        fetch(BASE_URL + '/api/admin/platform-wallet', {
+        fetch(BASE_URL + '/admin/api/platform-wallet', {
             headers: { "Authorization": "Bearer " + token }
         })
         .then(res => res.json())
         .then(data => {
-            document.getElementById("wallet").innerText = "KES " + data.balance;
+            document.getElementById("wallet").innerText =
+                "KES " + Number(data.balance).toFixed(2);
         })
         .catch(() => {
             document.getElementById("wallet").innerText = "❌ Failed to load";
@@ -100,7 +112,7 @@
     // ================= LOAD PAYOUTS =================
     function loadPayouts() {
 
-        fetch(BASE_URL + '/api/admin/payouts', {
+        fetch(BASE_URL + '/admin/api/payouts', {
             headers: { "Authorization": "Bearer " + token }
         })
         .then(res => res.json())
@@ -119,25 +131,46 @@
                 let disabled = p.status !== "PENDING" ? "disabled" : "";
 
                 let row = `
-                    <tr id="row-${p.id}">
-                        <td>${p.id}</td>
-                        <td>${p.propertyId}</td>
-                        <td>KES ${p.amount}</td>
-                        <td>${p.destination}</td>
+                    <tr>
+                        <td class="small">${p.id}</td>
 
-                        <td id="status-${p.id}" class="${statusClass}">
-                            ${p.status}
+                        <td>
+                            ${p.property_name || p.property_id}
                         </td>
 
                         <td>
-                            <button id="paid-${p.id}"
-                                class="paid ${disabled}"
+                            ${p.landlord_email || "—"}
+                        </td>
+
+                        <td>KES ${Number(p.amount).toFixed(2)}</td>
+
+                        <td>${p.method}</td>
+
+                        <td>${p.destination}</td>
+
+                        <td class="${statusClass}">
+                            ${p.status}
+                        </td>
+
+                        <td class="small">
+                            ${formatDate(p.created_at)}
+                        </td>
+
+                        <td class="small">
+                            ${p.processed_at ? formatDate(p.processed_at) : "—"}
+                        </td>
+
+                        <td>
+                            ${p.national_id || "—"}
+                        </td>
+
+                        <td>
+                            <button class="paid ${disabled}"
                                 onclick="markPaid('${p.id}')">
                                 PAID
                             </button>
 
-                            <button id="reject-${p.id}"
-                                class="reject ${disabled}"
+                            <button class="reject ${disabled}"
                                 onclick="rejectPayout('${p.id}')">
                                 REJECT
                             </button>
@@ -152,12 +185,19 @@
         .catch(() => alert("❌ Failed to load payouts"));
     }
 
+    // ================= FORMAT DATE =================
+    function formatDate(dateStr) {
+        if (!dateStr) return "—";
+
+        const date = new Date(dateStr);
+        return date.toLocaleString();
+    }
+
     // ================= MARK PAID =================
     function markPaid(id) {
 
         const nationalId = prompt("Enter National ID (Required):");
 
-        // 🔥 STRICT VALIDATION
         if (!nationalId || nationalId.trim().length < 5) {
             alert("❌ Valid National ID required");
             return;
@@ -184,13 +224,10 @@
 
         })
         .then(() => {
-
             alert("✅ Payout marked as PAID");
 
-            // 🔥 RELOAD EVERYTHING (SAFE + CONSISTENT)
             loadPayouts();
             loadWallet();
-
         })
         .catch(err => {
             alert("❌ " + err.message);
@@ -221,12 +258,8 @@
 
         })
         .then(() => {
-
             alert("❌ Payout rejected");
-
-            // 🔥 RELOAD DATA
             loadPayouts();
-
         })
         .catch(err => {
             alert("❌ " + err.message);
