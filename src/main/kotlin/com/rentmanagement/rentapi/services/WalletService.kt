@@ -1,13 +1,15 @@
 package com.rentmanagement.rentapi.services
 
+import com.rentmanagement.rentapi.models.Wallet
 import com.rentmanagement.rentapi.repository.PropertyRepository
 import com.rentmanagement.rentapi.repository.LedgerEntryRepository
+import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.wallet.dto.WalletResponse
 import com.rentmanagement.rentapi.wallet.dto.WalletTransactionResponse
 import org.slf4j.LoggerFactory
-import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -17,7 +19,7 @@ class WalletService(
 
     private val propertyRepository: PropertyRepository,
     private val ledgerEntryRepository: LedgerEntryRepository,
-    private val jdbcTemplate: JdbcTemplate
+    private val walletRepository: WalletRepository // ✅ ADDED
 
 ) {
 
@@ -27,7 +29,7 @@ class WalletService(
     private val formatter = DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a")
 
     // =====================================================
-    // 💰 GET WALLET (FINAL BANK-GRADE VERSION)
+    // 💰 GET WALLET (FINAL FIXED VERSION)
     // =====================================================
     fun getWallet(propertyId: UUID): WalletResponse {
 
@@ -35,30 +37,24 @@ class WalletService(
 
             log.info("💰 Loading wallet → property=$propertyId")
 
-            // ✅ Validate property exists
-            propertyRepository.findById(propertyId)
+            // ✅ Validate property
+            val property = propertyRepository.findById(propertyId)
                 .orElseThrow { RuntimeException("Property not found") }
 
             // =====================================================
-            // 🔥 READ WALLET DIRECTLY FROM DB (NO JPA BUGS)
+            // ✅ ENSURE WALLET EXISTS (CRITICAL FIX)
             // =====================================================
-            val walletRow = jdbcTemplate.queryForList(
-                """
-                SELECT mpesa_phone, account_number, bank_name
-                FROM wallets
-                WHERE property_id = ?
-                """.trimIndent(),
-                propertyId
-            ).firstOrNull()
+            val wallet = walletRepository.findByProperty(property)
+                ?: walletRepository.save(Wallet(property = property))
 
-            val mpesaPhone = walletRow?.get("mpesa_phone")?.toString()
-            val accountNumber = walletRow?.get("account_number")?.toString()
-            val bankName = walletRow?.get("bank_name")?.toString()
+            val mpesaPhone = wallet.mpesaPhone
+            val accountNumber = wallet.accountNumber
+            val bankName = wallet.bankName
 
             log.info("🏦 Wallet → account=$accountNumber mpesa=$mpesaPhone")
 
             // =====================================================
-            // 🏦 PAYOUT STATUS (THIS FIXES YOUR UI ISSUE)
+            // 🏦 PAYOUT STATUS
             // =====================================================
             val payoutSetupComplete =
                 !accountNumber.isNullOrBlank() ||
@@ -67,13 +63,12 @@ class WalletService(
             // =====================================================
             // 📒 FETCH LEDGER ENTRIES
             // =====================================================
-            val entries =
-                ledgerEntryRepository.findWalletTransactions(propertyId)
+            val entries = ledgerEntryRepository.findWalletTransactions(propertyId)
 
             log.info("📒 Ledger entries = ${entries.size}")
 
             // =====================================================
-            // 💰 BALANCE CALCULATION (CORRECT + SAFE)
+            // 💰 BALANCE CALCULATION (STRICT + SAFE)
             // =====================================================
             val rawBalance = entries.fold(BigDecimal.ZERO) { acc, entry ->
 
@@ -82,26 +77,29 @@ class WalletService(
                 val category = entry.category?.name
 
                 when {
-                    // ✅ ONLY REAL MONEY IN
-                    type == "CREDIT" && category == "RENT_PAYMENT" -> acc.add(amount)
+                    // ✅ RENT PAYMENTS (INCOME)
+                    type == "CREDIT" && category == "RENT_PAYMENT" ->
+                        acc.add(amount)
 
-                    // ✅ ONLY REAL MONEY OUT
-                    type == "DEBIT" && category == "PAYOUT" -> acc.subtract(amount)
+                    // ✅ PAYOUTS (EXPENSE)
+                    type == "DEBIT" && category == "PAYOUT" ->
+                        acc.subtract(amount)
 
-                    // ❌ IGNORE RENT_CHARGE + EVERYTHING ELSE
+                    // ❌ Ignore charges + noise
                     else -> acc
                 }
             }
 
             val safeBalance = rawBalance
                 .max(BigDecimal.ZERO)
-                .setScale(2, java.math.RoundingMode.HALF_UP)
+                .setScale(2, RoundingMode.HALF_UP)
 
             // =====================================================
-            // 📊 TOTAL COLLECTED (ONLY RENT PAYMENTS)
+            // 📊 TOTAL COLLECTED
             // =====================================================
             val totalCollected =
                 ledgerEntryRepository.getTotalCollected(propertyId)
+                    ?.setScale(2, RoundingMode.HALF_UP)
                     ?: BigDecimal.ZERO
 
             log.info("💰 Balance=$safeBalance collected=$totalCollected")
@@ -122,7 +120,6 @@ class WalletService(
 
             log.error("❌ Wallet load failed → property=$propertyId", e)
 
-            // 🔥 NEVER BREAK FRONTEND
             WalletResponse(
                 balance = 0.0,
                 totalCollected = 0.0,
@@ -135,7 +132,7 @@ class WalletService(
     }
 
     // =====================================================
-    // 📒 GET TRANSACTIONS (SAFE + CLEAN)
+    // 📒 GET TRANSACTIONS (CLEAN)
     // =====================================================
     fun getTransactions(propertyId: UUID): List<WalletTransactionResponse> {
 
@@ -169,7 +166,6 @@ class WalletService(
         } catch (e: Exception) {
 
             log.error("❌ Transactions failed → property=$propertyId", e)
-
             emptyList()
         }
     }
