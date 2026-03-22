@@ -5,6 +5,7 @@ enum class LedgerCategory {
     RENT_CHARGE,
     RENT_PAYMENT,
     WITHDRAWAL,
+    PAYOUT,
     REVERSAL
 
 }
