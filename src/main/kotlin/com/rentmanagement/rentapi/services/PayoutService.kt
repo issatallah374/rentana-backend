@@ -17,7 +17,7 @@ class PayoutService(
 
     // =====================================================
     // 💸 REQUEST PAYOUT
-    // =====================================================
+// =====================================================
     @Transactional
     fun requestPayout(
         landlordId: UUID,
@@ -27,7 +27,9 @@ class PayoutService(
 
         log.info("💸 Request payout → landlord=$landlordId property=$propertyId amount=$amount")
 
+        // ===============================
         // ✅ VALIDATION
+        // ===============================
         if (amount <= BigDecimal.ZERO) {
             throw BadRequestException("Enter a valid amount")
         }
@@ -36,7 +38,9 @@ class PayoutService(
             throw BadRequestException("Minimum withdrawal is KES 3")
         }
 
-        // ✅ OWNERSHIP CHECK
+        // ===============================
+        // 🔐 OWNERSHIP CHECK
+        // ===============================
         val ownsProperty = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM properties WHERE id = ? AND landlord_id = ?",
             Int::class.java,
@@ -48,32 +52,37 @@ class PayoutService(
             throw BadRequestException("You are not authorized for this property")
         }
 
-        // 🔥 CORRECT BALANCE FROM LEDGER (SOURCE OF TRUTH)
+        // ===============================
+        // 💰 WALLET BALANCE (LEDGER = SOURCE OF TRUTH)
+        // ===============================
         val balance = jdbcTemplate.queryForObject(
             """
-            SELECT COALESCE(SUM(
-                CASE
-                    WHEN entry_type = 'CREDIT' THEN amount
-                    WHEN entry_type = 'DEBIT' AND category = 'WITHDRAWAL' THEN -amount
-                END
-            ),0)
-            FROM ledger_entries
-            WHERE property_id = ?
-            """.trimIndent(),
+        SELECT COALESCE(SUM(
+            CASE
+                WHEN entry_type = 'CREDIT' THEN amount
+                WHEN entry_type = 'DEBIT' AND category = 'WITHDRAWAL' THEN -amount
+                ELSE 0
+            END
+        ), 0)
+        FROM ledger_entries
+        WHERE property_id = ?
+        """.trimIndent(),
             BigDecimal::class.java,
             propertyId
         ) ?: BigDecimal.ZERO
 
+        // ❌ INSUFFICIENT BALANCE
         if (amount > balance) {
             throw BadRequestException("Insufficient balance")
         }
 
-        // 🔥 SAFETY BUFFER
+        // 🔒 SAFETY BUFFER (leave KES 1)
         val minimumRemaining = BigDecimal("1")
-        if (balance - amount < minimumRemaining) {
+        if (balance.subtract(amount) < minimumRemaining) {
             throw BadRequestException("Leave at least KES 1 in wallet")
         }
 
+        // ===============================
         // ✅ GET PAYOUT METHOD
         val wallet = jdbcTemplate.queryForMap(
             "SELECT mpesa_phone, account_number FROM wallets WHERE property_id = ?",
@@ -89,9 +98,15 @@ class PayoutService(
             else -> throw BadRequestException("Please complete payout setup first")
         }
 
-        // ✅ PREVENT MULTIPLE REQUESTS
+        // ===============================
+        // 🚫 PREVENT MULTIPLE REQUESTS
+        // ===============================
         val pending = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM payout_requests WHERE property_id = ? AND status = 'PENDING'",
+            """
+        SELECT COUNT(*) 
+        FROM payout_requests 
+        WHERE property_id = ? AND status = 'PENDING'
+        """.trimIndent(),
             Int::class.java,
             propertyId
         ) ?: 0
@@ -100,19 +115,24 @@ class PayoutService(
             throw BadRequestException("You already have a pending payout")
         }
 
-        // ✅ INSERT REQUEST
+        // ===============================
+        // 💾 INSERT PAYOUT REQUEST
+        // ===============================
         jdbcTemplate.update(
             """
-            INSERT INTO payout_requests(
-                landlord_id,
-                property_id,
-                amount,
-                method,
-                destination,
-                status
-            )
-            VALUES (?, ?, ?, ?, ?, 'PENDING')
-            """.trimIndent(),
+        INSERT INTO payout_requests (
+            id,
+            landlord_id,
+            property_id,
+            amount,
+            method,
+            destination,
+            status,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 'PENDING', NOW())
+        """.trimIndent(),
+            UUID.randomUUID(),
             landlordId,
             propertyId,
             amount,
@@ -125,11 +145,15 @@ class PayoutService(
 
     // =====================================================
     // 🔥 ADMIN MARK AS PAID
-    // =====================================================
+// =====================================================
     @Transactional
-    fun markAsPaid(payoutId: UUID) {
+    fun markAsPaid(
+        payoutId: UUID,
+        adminId: UUID,
+        nationalId: String
+    ) {
 
-        log.info("🔥 Mark payout as PAID → id=$payoutId")
+        log.info("🔥 Mark payout as PAID → id=$payoutId admin=$adminId")
 
         val payout = jdbcTemplate.queryForMap(
             "SELECT * FROM payout_requests WHERE id = ? FOR UPDATE",
@@ -143,58 +167,75 @@ class PayoutService(
         val propertyId = UUID.fromString(payout["property_id"].toString())
         val amount = BigDecimal(payout["amount"].toString())
 
-        // ✅ WRITE TO LEDGER (SOURCE OF TRUTH)
+        // 🔥 VALIDATE NATIONAL ID
+        if (nationalId.isBlank()) {
+            throw BadRequestException("National ID is required")
+        }
+
+        // ✅ WRITE LEDGER
         jdbcTemplate.update(
             """
-            INSERT INTO ledger_entries(
-                property_id,
-                entry_type,
-                category,
-                amount,
-                reference,
-                created_at
-            )
-            VALUES (?, 'DEBIT', 'WITHDRAWAL', ?, ?, now())
-            """.trimIndent(),
+        INSERT INTO ledger_entries(
+            property_id,
+            entry_type,
+            category,
+            amount,
+            reference,
+            created_at
+        )
+        VALUES (?, 'DEBIT', 'WITHDRAWAL', ?, ?, now())
+        """.trimIndent(),
             propertyId,
             amount,
             "PAYOUT:$payoutId"
         )
 
-        // ✅ UPDATE STATUS
+        // ✅ UPDATE PAYOUT (🔥 FIXED HERE)
         jdbcTemplate.update(
             """
-            UPDATE payout_requests
-            SET status = 'PAID',
-                processed_at = now()
-            WHERE id = ?
-            """.trimIndent(),
+        UPDATE payout_requests
+        SET status = 'PAID',
+            processed_at = now(),
+            processed_by = ?,
+            national_id = ?
+        WHERE id = ?
+        """.trimIndent(),
+            adminId,
+            nationalId,
             payoutId
         )
 
         log.info("✅ payout marked as PAID → id=$payoutId")
     }
-
     // =====================================================
     // ❌ REJECT PAYOUT
     // =====================================================
+    // =====================================================
+// ❌ REJECT PAYOUT
+// =====================================================
+    @Transactional
     fun rejectPayout(payoutId: UUID) {
 
         log.info("❌ Reject payout → id=$payoutId")
 
-        val updated = jdbcTemplate.update(
-            """
-            UPDATE payout_requests
-            SET status = 'REJECTED',
-                processed_at = now()
-            WHERE id = ? AND status = 'PENDING'
-            """.trimIndent(),
+        val payout = jdbcTemplate.queryForMap(
+            "SELECT status FROM payout_requests WHERE id = ? FOR UPDATE",
             payoutId
         )
 
-        if (updated == 0) {
-            throw BadRequestException("Payout not found or already processed")
+        if (payout["status"] != "PENDING") {
+            throw BadRequestException("Payout already processed")
         }
+
+        jdbcTemplate.update(
+            """
+        UPDATE payout_requests
+        SET status = 'REJECTED',
+            processed_at = now()
+        WHERE id = ?
+        """.trimIndent(),
+            payoutId
+        )
 
         log.info("✅ payout rejected → id=$payoutId")
     }

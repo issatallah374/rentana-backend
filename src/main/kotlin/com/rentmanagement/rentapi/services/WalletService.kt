@@ -5,9 +5,10 @@ import com.rentmanagement.rentapi.repository.PropertyRepository
 import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.repository.LedgerEntryRepository
 import com.rentmanagement.rentapi.wallet.dto.WalletResponse
-import com.rentmanagement.rentapi.wallet.dto.WalletTransaction
+import com.rentmanagement.rentapi.wallet.dto.WalletTransactionResponse
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 @Service
@@ -20,7 +21,7 @@ class WalletService(
 ) {
 
     // ===============================
-    // 💰 GET WALLET (CORRECT)
+    // 💰 GET WALLET
     // ===============================
     fun getWallet(propertyId: UUID): WalletResponse {
 
@@ -28,23 +29,30 @@ class WalletService(
             .findById(propertyId)
             .orElseThrow { RuntimeException("Property not found") }
 
+        // Ensure wallet exists
         val wallet = walletRepository.findByProperty(property)
             ?: walletRepository.save(Wallet(property = property))
 
-        // ✅ TRUE BALANCE (ledger-based)
-        val entries = ledgerEntryRepository.findWalletTransactions(propertyId)
+        // Fetch ledger entries
+        val entries =
+            ledgerEntryRepository.findWalletTransactions(propertyId)
 
+        // ✅ SAFE BALANCE CALCULATION
         val balance = entries.fold(BigDecimal.ZERO) { acc, entry ->
-            when (entry.entryType.name) {
-                "CREDIT" -> acc + entry.amount
-                "DEBIT" -> acc - entry.amount
+
+            val amount = entry.amount ?: BigDecimal.ZERO
+
+            when (entry.entryType?.name) {
+                "CREDIT" -> acc + amount
+                "DEBIT" -> acc - amount
                 else -> acc
             }
         }
 
-        // ✅ TOTAL COLLECTED (CORRECT)
+        // ✅ TOTAL COLLECTED (SAFE)
         val totalCollected =
             ledgerEntryRepository.getTotalCollected(propertyId)
+                ?: BigDecimal.ZERO
 
         val payoutSetupComplete =
             !wallet.accountNumber.isNullOrBlank() ||
@@ -61,21 +69,27 @@ class WalletService(
     }
 
     // ===============================
-    // 📒 TRANSACTIONS
+    // 📒 GET TRANSACTIONS
     // ===============================
-    fun getTransactions(propertyId: UUID): List<WalletTransaction> {
 
-        val entries = ledgerEntryRepository.findWalletTransactions(propertyId)
+    fun getTransactions(propertyId: UUID): List<WalletTransactionResponse> {
 
-        return entries.map {
-            WalletTransaction(
-                id = it.id!!,
-                amount = it.amount,
-                entryType = it.entryType.name,
-                category = it.category?.name,
-                reference = it.reference,
-                createdAt = it.createdAt
-            )
-        }
+        val formatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
+
+        return ledgerEntryRepository
+            .findWalletTransactions(propertyId)
+            .map { entry ->
+
+                WalletTransactionResponse(
+                    id = entry.id?.toString() ?: "",
+                    amount = entry.amount?.toDouble() ?: 0.0,
+                    entryType = entry.entryType?.name ?: "UNKNOWN",
+                    category = entry.category?.name,
+                    reference = entry.reference,
+                    createdAt = entry.createdAt
+                        ?.format(formatter)
+                        ?: ""
+                )
+            }
     }
 }

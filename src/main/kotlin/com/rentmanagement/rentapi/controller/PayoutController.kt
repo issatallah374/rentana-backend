@@ -20,9 +20,8 @@ class PayoutController(
 
     private val log = LoggerFactory.getLogger(PayoutController::class.java)
 
-    // =====================================================
     // 💸 REQUEST PAYOUT
-    // =====================================================
+// =====================================================
     @PostMapping("/request")
     fun requestPayout(
         @RequestParam propertyId: UUID,
@@ -32,6 +31,15 @@ class PayoutController(
 
         if (authentication == null || authentication.name.isNullOrBlank()) {
             throw RuntimeException("Unauthorized")
+        }
+
+        // ✅ MINIMUM CHECK (FAST FAIL)
+        if (amount <= BigDecimal.ZERO) {
+            throw RuntimeException("Enter a valid amount")
+        }
+
+        if (amount < BigDecimal("3")) {
+            throw RuntimeException("Minimum withdrawal is KES 3")
         }
 
         val landlordId = UUID.fromString(authentication.name)
@@ -66,9 +74,12 @@ class PayoutController(
     // =====================================================
     // 🔥 ADMIN MARK AS PAID
     // =====================================================
+    // 🔥 ADMIN MARK AS PAID
+// =====================================================
     @PostMapping("/{id}/mark-paid")
     fun markPaid(
         @PathVariable id: UUID,
+        @RequestParam nationalId: String,
         authentication: Authentication?
     ): ResponseEntity<String> {
 
@@ -80,21 +91,33 @@ class PayoutController(
             throw RuntimeException("Forbidden")
         }
 
-        payoutService.markAsPaid(id)
+        val adminId = UUID.fromString(authentication.name)
+
+        payoutService.markAsPaid(
+            payoutId = id,
+            adminId = adminId,
+            nationalId = nationalId
+        )
 
         return ResponseEntity.ok("Marked as paid")
     }
 
+
     // =====================================================
     // ❌ ADMIN REJECT
     // =====================================================
+    // =====================================================
+// ❌ ADMIN REJECT
+// =====================================================
     @PostMapping("/{id}/reject")
     fun rejectPayout(
         @PathVariable id: UUID,
         authentication: Authentication?
     ): ResponseEntity<String> {
 
-        if (authentication == null) throw RuntimeException("Unauthorized")
+        if (authentication == null) {
+            throw RuntimeException("Unauthorized")
+        }
 
         val roles = authentication.authorities.map { it.authority }
 

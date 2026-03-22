@@ -1,7 +1,7 @@
 package com.rentmanagement.rentapi.controller
 
 import com.rentmanagement.rentapi.wallet.dto.WalletResponse
-import com.rentmanagement.rentapi.wallet.dto.WalletTransaction
+import com.rentmanagement.rentapi.wallet.dto.WalletTransactionResponse
 import com.rentmanagement.rentapi.services.WalletService
 import com.rentmanagement.rentapi.repository.PropertyRepository
 import com.rentmanagement.rentapi.repository.WalletRepository
@@ -37,7 +37,7 @@ class WalletController(
     // 📒 TRANSACTIONS
     // ================================
     @GetMapping("/{propertyId}/wallet/transactions")
-    fun transactions(@PathVariable propertyId: UUID): List<WalletTransaction> {
+    fun transactions(@PathVariable propertyId: UUID): List<WalletTransactionResponse> {
         return walletService.getTransactions(propertyId)
     }
 
