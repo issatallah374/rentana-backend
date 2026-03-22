@@ -9,14 +9,21 @@ import java.util.UUID
 
 interface LedgerEntryRepository : JpaRepository<LedgerEntry, UUID> {
 
-    // ===============================
-    // 📒 WALLET TRANSACTIONS
-    // ===============================
+    // =====================================================
+    // 📒 WALLET TRANSACTIONS (FILTERED = CLEAN UI)
+    // =====================================================
     @Query(
         """
         SELECT l
         FROM LedgerEntry l
         WHERE l.property.id = :propertyId
+        AND (
+            (l.entryType = com.rentmanagement.rentapi.models.LedgerEntryType.CREDIT 
+             AND l.category = com.rentmanagement.rentapi.models.LedgerCategory.RENT_PAYMENT)
+            OR
+            (l.entryType = com.rentmanagement.rentapi.models.LedgerEntryType.DEBIT 
+             AND l.category = com.rentmanagement.rentapi.models.LedgerCategory.PAYOUT)
+        )
         ORDER BY l.createdAt DESC
         """
     )
@@ -24,30 +31,32 @@ interface LedgerEntryRepository : JpaRepository<LedgerEntry, UUID> {
         @Param("propertyId") propertyId: UUID
     ): List<LedgerEntry>
 
-    // ===============================
-    // 💰 TOTAL COLLECTED (ALL TIME)
-    // ===============================
+    // =====================================================
+    // 💰 TOTAL COLLECTED (ONLY REAL PAYMENTS)
+    // =====================================================
     @Query(
         """
         SELECT COALESCE(SUM(l.amount),0)
         FROM LedgerEntry l
         WHERE l.property.id = :propertyId
-        AND l.entryType = 'CREDIT'
+        AND l.entryType = com.rentmanagement.rentapi.models.LedgerEntryType.CREDIT
+        AND l.category = com.rentmanagement.rentapi.models.LedgerCategory.RENT_PAYMENT
         """
     )
     fun getTotalCollected(
         @Param("propertyId") propertyId: UUID
     ): BigDecimal
 
-    // ===============================
+    // =====================================================
     // 📅 MONTHLY RENT CHARGED
-    // ===============================
+    // =====================================================
     @Query(
         """
         SELECT COALESCE(SUM(l.amount),0)
         FROM LedgerEntry l
         WHERE l.property.id = :propertyId
-        AND l.entryType = 'DEBIT'
+        AND l.entryType = com.rentmanagement.rentapi.models.LedgerEntryType.DEBIT
+        AND l.category = com.rentmanagement.rentapi.models.LedgerCategory.RENT_CHARGE
         AND EXTRACT(YEAR FROM l.createdAt) = :year
         AND EXTRACT(MONTH FROM l.createdAt) = :month
         """
@@ -58,15 +67,16 @@ interface LedgerEntryRepository : JpaRepository<LedgerEntry, UUID> {
         @Param("month") month: Int
     ): BigDecimal
 
-    // ===============================
-    // 📅 MONTHLY PAYMENTS
-    // ===============================
+    // =====================================================
+    // 📅 MONTHLY PAYMENTS (ONLY RENT PAYMENTS)
+    // =====================================================
     @Query(
         """
         SELECT COALESCE(SUM(l.amount),0)
         FROM LedgerEntry l
         WHERE l.property.id = :propertyId
-        AND l.entryType = 'CREDIT'
+        AND l.entryType = com.rentmanagement.rentapi.models.LedgerEntryType.CREDIT
+        AND l.category = com.rentmanagement.rentapi.models.LedgerCategory.RENT_PAYMENT
         AND EXTRACT(YEAR FROM l.createdAt) = :year
         AND EXTRACT(MONTH FROM l.createdAt) = :month
         """
