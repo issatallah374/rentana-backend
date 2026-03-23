@@ -161,17 +161,16 @@ class MpesaService(
             log.info("🏠 TENANCY FOUND → id=${tenancy.id}")
 
             // =====================================================
-            // 5. PROCESS PAYMENT (POSTGRES FUNCTION)
+            // 5. PROCESS PAYMENT (FIXED ✅)
             // =====================================================
-            val rows = jdbcTemplate.queryForObject(
+            jdbcTemplate.update(
                 "SELECT process_payment(?::uuid, ?::numeric, ?)",
-                Int::class.java,
                 tenancy.id,
                 amount,
                 reference
             )
 
-            log.info("💰 DB FUNCTION EXECUTED → result=$rows")
+            log.info("💰 DB FUNCTION EXECUTED")
 
             // =====================================================
             // 6. MARK AS PROCESSED
