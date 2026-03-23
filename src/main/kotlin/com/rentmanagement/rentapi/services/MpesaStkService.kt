@@ -83,7 +83,7 @@ class MpesaStkService(
 
     // =========================================================
     // 📲 STK PUSH (WITH PLAN ID)
-    // =========================================================
+    // ========================================================
     fun stkPush(
         phone: String,
         amount: BigDecimal,
@@ -93,10 +93,7 @@ class MpesaStkService(
 
         try {
 
-            // 🔐 Validate callback URL
-            if (!callbackUrl.startsWith("https://")) {
-                throw RuntimeException("Callback URL must be HTTPS")
-            }
+            log.warn("🌐 USING CALLBACK URL → $callbackUrl")
 
             val formattedPhone = normalizePhone(phone)
             val token = getAccessToken()
