@@ -6,7 +6,6 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
 @RestController
-@RequestMapping("/api/payments/c2b") // ✅ SAFE (NO mpesa)
 class C2BController(
     private val mpesaService: MpesaService
 ) {
@@ -14,9 +13,15 @@ class C2BController(
     private val log = LoggerFactory.getLogger(C2BController::class.java)
 
     // =====================================================
-    // 🟢 VALIDATION
+    // 🟢 VALIDATION (NEW + LEGACY)
     // =====================================================
-    @PostMapping("/validation", consumes = ["application/json"])
+    @PostMapping(
+        value = [
+            "/api/payments/c2b/validation", // ✅ NEW (SAFE)
+            "/api/c2b/validation"           // ⚠️ LEGACY (SAFARICOM)
+        ],
+        consumes = ["application/json"]
+    )
     fun c2bValidation(
         @RequestBody payload: Map<String, Any>?
     ): ResponseEntity<Map<String, String>> {
@@ -32,9 +37,15 @@ class C2BController(
     }
 
     // =====================================================
-    // 💰 CONFIRMATION
+    // 💰 CONFIRMATION (NEW + LEGACY)
     // =====================================================
-    @PostMapping("/confirmation", consumes = ["application/json"])
+    @PostMapping(
+        value = [
+            "/api/payments/c2b/confirmation", // ✅ NEW
+            "/api/c2b/confirmation"           // ⚠️ LEGACY
+        ],
+        consumes = ["application/json"]
+    )
     fun c2bConfirmation(
         @RequestBody payload: Map<String, Any>?
     ): ResponseEntity<Map<String, String>> {
@@ -45,6 +56,7 @@ class C2BController(
                 log.warn("⚠️ Empty C2B confirmation")
             } else {
                 log.info("💰 C2B CONFIRMATION RECEIVED → {}", payload)
+
                 mpesaService.processC2BPayment(payload)
             }
 

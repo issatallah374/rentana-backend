@@ -163,12 +163,15 @@ class MpesaService(
             // =====================================================
             // 5. PROCESS PAYMENT (FIXED ✅)
             // =====================================================
-            jdbcTemplate.update(
-                "SELECT process_payment(?::uuid, ?::numeric, ?)",
-                tenancy.id,
-                amount,
-                reference
-            )
+            try {
+                jdbcTemplate.execute(
+                    "SELECT process_payment('${tenancy.id}', ${amount}, '$reference')"
+                )
+                log.info("💰 DB FUNCTION EXECUTED")
+            } catch (e: Exception) {
+                log.error("❌ DB FUNCTION FAILED → $reference", e)
+                return
+            }
 
             log.info("💰 DB FUNCTION EXECUTED")
 
