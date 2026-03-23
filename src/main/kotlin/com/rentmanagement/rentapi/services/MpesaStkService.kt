@@ -10,7 +10,6 @@ import org.springframework.web.client.RestTemplate
 import java.math.BigDecimal
 import java.text.SimpleDateFormat
 import java.util.*
-import java.util.Base64
 
 @Service
 class MpesaStkService(
@@ -35,6 +34,10 @@ class MpesaStkService(
     @Value("\${mpesa.callbackUrl}")
     lateinit var callbackUrl: String
 
+    // ✅ NEW (ENV SWITCH)
+    @Value("\${mpesa.baseUrl}")
+    lateinit var baseUrl: String
+
     // =========================================================
     // 🔐 ACCESS TOKEN
     // =========================================================
@@ -43,13 +46,14 @@ class MpesaStkService(
         val credentials = "$consumerKey:$consumerSecret"
         val encoded = Base64.getEncoder().encodeToString(credentials.toByteArray())
 
-        val headers = HttpHeaders()
-        headers.set("Authorization", "Basic $encoded")
+        val headers = HttpHeaders().apply {
+            set("Authorization", "Basic $encoded")
+        }
 
         val request = HttpEntity<String>(headers)
 
         val response = restTemplate.exchange(
-            "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials",
+            "$baseUrl/oauth/v1/generate?grant_type=client_credentials",
             HttpMethod.GET,
             request,
             Map::class.java
@@ -78,13 +82,14 @@ class MpesaStkService(
     }
 
     // =========================================================
-    // 📲 STK PUSH (SUBSCRIPTION ONLY)
+    // 📲 STK PUSH (WITH PLAN ID)
     // =========================================================
     fun stkPush(
         phone: String,
         amount: BigDecimal,
-        landlordId: UUID
-    ): Any {
+        landlordId: UUID,
+        planId: UUID
+    ): Map<String, Any> {
 
         try {
 
@@ -95,7 +100,6 @@ class MpesaStkService(
 
             val formattedPhone = normalizePhone(phone)
             val token = getAccessToken()
-
             val timestamp = SimpleDateFormat("yyyyMMddHHmmss").format(Date())
 
             val password = Base64.getEncoder().encodeToString(
@@ -114,7 +118,7 @@ class MpesaStkService(
                 "Password" to password,
                 "Timestamp" to timestamp,
                 "TransactionType" to "CustomerPayBillOnline",
-                "Amount" to amount.toInt(), // MPESA requires integer
+                "Amount" to amount.setScale(0).toInt(), // ✅ SAFE
                 "PartyA" to formattedPhone,
                 "PartyB" to shortcode,
                 "PhoneNumber" to formattedPhone,
@@ -123,13 +127,12 @@ class MpesaStkService(
                 "TransactionDesc" to "Subscription Payment"
             )
 
-            log.info("📤 STK REQUEST → phone=$formattedPhone amount=$amount ref=$accountRef")
-            log.info("🌍 CALLBACK URL → $callbackUrl")
+            log.info("📤 STK REQUEST → phone=$formattedPhone amount=$amount plan=$planId")
 
             val request = HttpEntity(payload, headers)
 
             val response = restTemplate.postForEntity(
-                "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest",
+                "$baseUrl/mpesa/stkpush/v1/processrequest",
                 request,
                 Map::class.java
             )
@@ -144,22 +147,31 @@ class MpesaStkService(
             val merchantId = body["MerchantRequestID"]?.toString()
 
             // =====================================================
-            // 💾 SAVE STK REQUEST
+            // ⚠️ IDEMPOTENCY CHECK
+            // =====================================================
+            if (stkRequestRepository.findByCheckoutRequestId(checkoutId) != null) {
+                log.warn("⚠️ Duplicate STK request → $checkoutId")
+                return body as Map<String, Any>
+            }
+
+            // =====================================================
+            // 💾 SAVE STK REQUEST WITH PLAN ID
             // =====================================================
             stkRequestRepository.save(
                 StkRequest(
                     checkoutRequestId = checkoutId,
                     merchantRequestId = merchantId,
                     landlordId = landlordId,
+                    planId = planId,
                     phoneNumber = formattedPhone,
                     amount = amount,
                     status = "PENDING"
                 )
             )
 
-            log.info("✅ STK SAVED → checkoutId=$checkoutId")
+            log.info("✅ STK SAVED → checkoutId=$checkoutId planId=$planId")
 
-            return body
+            return body as Map<String, Any>
 
         } catch (e: Exception) {
             log.error("❌ STK ERROR → ${e.message}", e)

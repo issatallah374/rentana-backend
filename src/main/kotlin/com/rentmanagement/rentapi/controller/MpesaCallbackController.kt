@@ -22,22 +22,27 @@ class MpesaCallbackController(
         @RequestBody request: StkPushRequest
     ): ResponseEntity<Map<String, String>> {
 
-        if (request.phone.isBlank() || request.landlordId.isBlank() || request.amount <= 0) {
+        // ✅ STRICT VALIDATION (NO AMOUNT TRUST)
+        if (
+            request.phone.isBlank() ||
+            request.landlordId.isBlank() ||
+            request.planId.isBlank()
+        ) {
             return ResponseEntity.badRequest().body(
                 mapOf("error" to "Invalid request data")
             )
         }
 
         log.info(
-            "📲 STK REQUEST → phone=${request.phone}, amount=${request.amount}, landlord=${request.landlordId}"
+            "📲 STK REQUEST → phone=${request.phone}, landlord=${request.landlordId}, plan=${request.planId}"
         )
 
         return try {
 
             mpesaService.initiateStkPush(
-                request.phone,
-                request.amount,
-                request.landlordId
+                phone = request.phone,
+                landlordId = request.landlordId,
+                planId = request.planId
             )
 
             ResponseEntity.ok(
@@ -57,15 +62,6 @@ class MpesaCallbackController(
     // =====================================================
     // 🔵 STK CALLBACK (SUBSCRIPTION ONLY)
     // =====================================================
-
-    /**
-     * ✅ Safaricom sends:
-     * - POST → actual payment callback
-     * - GET → sometimes ping/test
-     *
-     * We support BOTH safely.
-     */
-
     @PostMapping("/stk-callback", consumes = ["application/json"])
     fun stkCallbackPost(
         @RequestBody(required = false) payload: Map<String, Any>?
@@ -85,7 +81,7 @@ class MpesaCallbackController(
             }
         }
 
-        // ALWAYS return success to Safaricom
+        // ✅ ALWAYS ACKNOWLEDGE SAFARICOM
         return ResponseEntity.ok(
             mapOf(
                 "ResultCode" to "0",

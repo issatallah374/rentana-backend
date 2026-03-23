@@ -22,6 +22,10 @@ data class StkRequest(
     @Column(name = "landlord_id", nullable = false)
     var landlordId: UUID,
 
+    // 🔥 ADD THIS FIELD (CRITICAL)
+    @Column(name = "plan_id", nullable = false)
+    var planId: UUID,
+
     @Column(name = "phone_number")
     var phoneNumber: String? = null,
 
