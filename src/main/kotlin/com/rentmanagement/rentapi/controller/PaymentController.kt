@@ -2,17 +2,18 @@ package com.rentmanagement.rentapi.controller
 
 import com.rentmanagement.rentapi.dto.PaymentResponse
 import com.rentmanagement.rentapi.repository.PaymentRepository
+import com.rentmanagement.rentapi.repository.SubscriptionPlanRepository
 import com.rentmanagement.rentapi.services.MpesaStkService
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
-import java.math.BigDecimal
 import java.util.UUID
 
 @RestController
 @RequestMapping("/api/payments")
 class PaymentController(
     private val paymentRepository: PaymentRepository,
-    private val mpesaStkService: MpesaStkService
+    private val mpesaStkService: MpesaStkService,
+    private val subscriptionPlanRepository: SubscriptionPlanRepository
 ) {
 
     // =========================
@@ -60,19 +61,30 @@ class PaymentController(
     }
 
     // =========================
-    // 💰 LANDLORD SUBSCRIPTION STK (🔥 FIXED)
+    // 💰 LANDLORD SUBSCRIPTION STK (🔥 FINAL CLEAN FLOW)
     // =========================
     @PostMapping("/stk/subscribe")
     fun initiateSubscriptionSTK(
         @RequestParam phone: String,
-        @RequestParam amount: BigDecimal,
-        @RequestParam landlordId: UUID // ✅ REQUIRED
+        @RequestParam landlordId: UUID,
+        @RequestParam planId: UUID
     ): ResponseEntity<Any> {
 
+        // ✅ VALIDATION
+        if (phone.isBlank()) {
+            return ResponseEntity.badRequest().body(mapOf("error" to "Phone is required"))
+        }
+
+        // ✅ FETCH PLAN (SOURCE OF TRUTH)
+        val plan = subscriptionPlanRepository.findById(planId)
+            .orElseThrow { RuntimeException("Plan not found") }
+
+        // ✅ USE PLAN PRICE (NO GUESSING)
         val response = mpesaStkService.stkPush(
             phone = phone,
-            amount = amount,
-            landlordId = landlordId // ✅ FIXED
+            amount = plan.price,
+            landlordId = landlordId,
+            planId = planId
         )
 
         return ResponseEntity.ok(response)
