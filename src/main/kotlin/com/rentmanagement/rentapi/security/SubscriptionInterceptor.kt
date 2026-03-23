@@ -3,6 +3,7 @@ package com.rentmanagement.rentapi.security
 import com.rentmanagement.rentapi.repository.SubscriptionRepository
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.web.servlet.HandlerInterceptor
 import java.time.LocalDateTime
@@ -13,6 +14,8 @@ class SubscriptionInterceptor(
     private val jwtUtil: JwtUtil
 ) : HandlerInterceptor {
 
+    private val log = LoggerFactory.getLogger(SubscriptionInterceptor::class.java)
+
     override fun preHandle(
         request: HttpServletRequest,
         response: HttpServletResponse,
@@ -21,42 +24,68 @@ class SubscriptionInterceptor(
 
         val path = request.requestURI
 
-        // ✅ PUBLIC / SAFE ENDPOINTS
+        // =====================================================
+        // ✅ PUBLIC / SAFE ENDPOINTS (CRITICAL 🔥)
+        // =====================================================
         if (
-            path.contains("/auth") ||
-            path.contains("/subscriptions") ||
-            path.contains("/mpesa/callback") ||
-            path.contains("/payments/callback")
+            path.startsWith("/api/auth") ||
+            path.startsWith("/api/mpesa") ||           // 🔥 FIX → allow STK + callbacks
+            path.startsWith("/api/subscriptions") ||
+            path.startsWith("/error")
         ) {
             return true
         }
 
-        val authHeader = request.getHeader("Authorization") ?: return true
-        val token = authHeader.replace("Bearer ", "")
+        val authHeader = request.getHeader("Authorization")
 
-        val userId = jwtUtil.extractUserId(token)
-
-        val sub = subscriptionRepository
-            .findTopByLandlordIdOrderByCreatedAtDesc(userId)
-
-        val isExpired =
-            sub == null ||
-                    sub.status != "ACTIVE" ||
-                    sub.endDate?.isBefore(LocalDateTime.now()) != false
-        // ✅ IF EXPIRED → allow ONLY wallet access
-        if (isExpired) {
-
-            if (path.contains("/wallet")) {
-                return true
-            }
-
-            response.status = 403
-            response.contentType = "application/json"
-            response.writer.write("""{"error":"SUBSCRIPTION_REQUIRED"}""")
-
-            return false
+        // =====================================================
+        // ✅ NO TOKEN → ALLOW (handled by security later)
+        // =====================================================
+        if (authHeader.isNullOrBlank() || !authHeader.startsWith("Bearer ")) {
+            return true
         }
 
-        return true
+        val token = authHeader.substring(7)
+
+        try {
+
+            val userId = jwtUtil.extractUserId(token)
+
+            val sub = subscriptionRepository
+                .findTopByLandlordIdOrderByCreatedAtDesc(userId)
+
+            val isExpired =
+                sub == null ||
+                        sub.status != "ACTIVE" ||
+                        sub.endDate?.isBefore(LocalDateTime.now()) != false
+
+            // =====================================================
+            // ❌ BLOCK IF NO ACTIVE SUBSCRIPTION
+            // =====================================================
+            if (isExpired) {
+
+                log.warn("❌ Subscription required → user=$userId path=$path")
+
+                // ✅ allow wallet access even if expired
+                if (path.contains("/wallet")) {
+                    return true
+                }
+
+                response.status = 403
+                response.contentType = "application/json"
+                response.writer.write("""{"error":"SUBSCRIPTION_REQUIRED"}""")
+
+                return false
+            }
+
+            return true
+
+        } catch (e: Exception) {
+
+            log.error("❌ Subscription check failed", e)
+
+            // 🚫 NEVER BLOCK on error
+            return true
+        }
     }
 }
