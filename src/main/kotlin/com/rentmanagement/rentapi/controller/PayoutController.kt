@@ -1,12 +1,12 @@
-package com.rentmanagement.rentapi.controllers
+package com.rentmanagement.rentapi.controller
 
+import com.rentmanagement.rentapi.repository.PropertyRepository
+import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.services.PayoutService
 import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
 import org.springframework.web.bind.annotation.*
-import com.rentmanagement.rentapi.repository.PropertyRepository
-import com.rentmanagement.rentapi.repository.WalletRepository
 import java.math.BigDecimal
 import java.util.*
 
@@ -21,49 +21,59 @@ class PayoutController(
     private val log = LoggerFactory.getLogger(PayoutController::class.java)
 
     // =====================================================
+    // 🔐 HELPERS
+    // =====================================================
+    private fun requireUser(auth: Authentication?): UUID {
+        if (auth == null || auth.name.isNullOrBlank()) {
+            throw RuntimeException("Unauthorized")
+        }
+        return UUID.fromString(auth.name)
+    }
+
+    private fun requireAdmin(auth: Authentication?): UUID {
+        val userId = requireUser(auth)
+        val roles = auth!!.authorities.map { it.authority }
+
+        if (!roles.contains("ROLE_ADMIN")) {
+            throw RuntimeException("Forbidden")
+        }
+
+        return userId
+    }
+
+    // =====================================================
     // 💸 REQUEST PAYOUT
     // =====================================================
     @PostMapping("/request")
     fun requestPayout(
         @RequestParam propertyId: UUID,
         @RequestParam amount: BigDecimal,
-        authentication: Authentication?
-    ): ResponseEntity<String> {
+        auth: Authentication?
+    ): ResponseEntity<Any> {
 
-        if (authentication == null || authentication.name.isNullOrBlank()) {
-            throw RuntimeException("Unauthorized")
-        }
+        val landlordId = requireUser(auth)
 
         if (amount <= BigDecimal.ZERO) {
-            throw RuntimeException("Enter a valid amount")
+            return ResponseEntity.badRequest().body("Invalid amount")
         }
 
         if (amount < BigDecimal("3")) {
-            throw RuntimeException("Minimum withdrawal is KES 3")
+            return ResponseEntity.badRequest().body("Minimum withdrawal is KES 3")
         }
-
-        val landlordId = UUID.fromString(authentication.name)
 
         val property = propertyRepository.findById(propertyId)
             .orElseThrow { RuntimeException("Property not found") }
 
-        // 🔐 ownership check
         if (property.landlord.id != landlordId) {
             throw RuntimeException("Unauthorized")
         }
 
-        // =====================================================
-        // 🔥 FIXED (USE PROPERTY ID, NOT ENTITY)
-        // =====================================================
         val wallet = walletRepository.findByPropertyId(propertyId)
             ?: throw RuntimeException("Wallet not found")
 
-        // 🔒 enforce payout setup
         if (wallet.accountNumber.isNullOrBlank() && wallet.mpesaPhone.isNullOrBlank()) {
-            throw RuntimeException("Complete payout setup first")
+            return ResponseEntity.badRequest().body("Complete payout setup first")
         }
-
-        log.info("💸 Payout request → landlord=$landlordId property=$propertyId amount=$amount")
 
         payoutService.requestPayout(
             landlordId = landlordId,
@@ -71,7 +81,9 @@ class PayoutController(
             amount = amount
         )
 
-        return ResponseEntity.ok("Payout requested")
+        log.info("💸 Payout requested → landlord=$landlordId property=$propertyId amount=$amount")
+
+        return ResponseEntity.ok(mapOf("message" to "Payout requested"))
     }
 
     // =====================================================
@@ -81,18 +93,14 @@ class PayoutController(
     fun markPaid(
         @PathVariable id: UUID,
         @RequestParam nationalId: String,
-        authentication: Authentication?
-    ): ResponseEntity<String> {
+        auth: Authentication?
+    ): ResponseEntity<Any> {
 
-        if (authentication == null) throw RuntimeException("Unauthorized")
+        val adminId = requireAdmin(auth)
 
-        val roles = authentication.authorities.map { it.authority }
-
-        if (!roles.contains("ROLE_ADMIN")) {
-            throw RuntimeException("Forbidden")
+        if (nationalId.isBlank()) {
+            return ResponseEntity.badRequest().body("National ID required")
         }
-
-        val adminId = UUID.fromString(authentication.name)
 
         payoutService.markAsPaid(
             payoutId = id,
@@ -100,7 +108,9 @@ class PayoutController(
             nationalId = nationalId
         )
 
-        return ResponseEntity.ok("Marked as paid")
+        log.info("✅ Admin marked payout as PAID → payout=$id admin=$adminId")
+
+        return ResponseEntity.ok(mapOf("message" to "Marked as paid"))
     }
 
     // =====================================================
@@ -109,21 +119,18 @@ class PayoutController(
     @PostMapping("/{id}/reject")
     fun rejectPayout(
         @PathVariable id: UUID,
-        authentication: Authentication?
-    ): ResponseEntity<String> {
+        auth: Authentication?
+    ): ResponseEntity<Any> {
 
-        if (authentication == null) {
-            throw RuntimeException("Unauthorized")
-        }
+        val adminId = requireAdmin(auth)
 
-        val roles = authentication.authorities.map { it.authority }
+        payoutService.rejectPayout(
+            payoutId = id,
+            adminId = adminId
+        )
 
-        if (!roles.contains("ROLE_ADMIN")) {
-            throw RuntimeException("Forbidden")
-        }
+        log.info("❌ Admin rejected payout → payout=$id admin=$adminId")
 
-        payoutService.rejectPayout(id)
-
-        return ResponseEntity.ok("Payout rejected")
+        return ResponseEntity.ok(mapOf("message" to "Payout rejected"))
     }
 }

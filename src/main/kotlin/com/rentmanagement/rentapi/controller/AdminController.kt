@@ -1,6 +1,8 @@
 package com.rentmanagement.rentapi.controller
 
 import org.slf4j.LoggerFactory
+import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.core.Authentication
 import org.springframework.stereotype.Controller
@@ -16,32 +18,39 @@ class AdminController(
     private val log = LoggerFactory.getLogger(AdminController::class.java)
 
     // =====================================================
+    // 🔐 AUTH HELPERS (CLEAN 🔥)
+    // =====================================================
+    private fun requireAdmin(auth: Authentication?): UUID {
+        if (auth == null || auth.name.isNullOrBlank()) {
+            throw RuntimeException("Unauthorized")
+        }
+
+        val roles = auth.authorities.map { it.authority }
+        if (!roles.contains("ROLE_ADMIN")) {
+            throw RuntimeException("Forbidden")
+        }
+
+        return UUID.fromString(auth.name)
+    }
+
+    // =====================================================
     // 🔐 LOGIN PAGE
     // =====================================================
     @GetMapping("/login")
-    fun login(): String {
-        return "admin/login"
-    }
+    fun login(): String = "admin/login"
 
     // =====================================================
-    // 🏠 HOME (MENU)
+    // 🏠 HOME
     // =====================================================
     @GetMapping
-    fun index(): String {
-        return "admin/index"
-    }
+    fun index(): String = "admin/index"
 
     // =====================================================
-    // 📊 DASHBOARD PAGE
+    // 📊 DASHBOARD
     // =====================================================
     @GetMapping("/dashboard")
-    fun dashboard(): String {
-        return "admin/dashboard"
-    }
+    fun dashboard(): String = "admin/dashboard"
 
-    // =====================================================
-    // 📄 OPTIONAL PAGES
-    // =====================================================
     @GetMapping("/payouts")
     fun payouts(): String = "admin/dashboard"
 
@@ -51,30 +60,16 @@ class AdminController(
     @GetMapping("/wallet")
     fun wallet(): String = "admin/dashboard"
 
-
     // =====================================================
-    // =====================================================
-    // 🔥 🔥 🔥 API SECTION (CRITICAL)
-    // =====================================================
-    // =====================================================
-
-    // =====================================================
-    // 💸 GET ALL PAYOUTS (ADMIN)
+    // 💸 GET PAYOUTS
     // =====================================================
     @ResponseBody
     @GetMapping("/api/payouts")
-    fun getAllPayouts(authentication: Authentication?): List<Map<String, Any>> {
+    fun getAllPayouts(auth: Authentication?): ResponseEntity<Any> {
 
-        if (authentication == null) throw RuntimeException("Unauthorized")
+        requireAdmin(auth)
 
-        val roles = authentication.authorities.map { it.authority }
-        if (!roles.contains("ROLE_ADMIN")) {
-            throw RuntimeException("Forbidden")
-        }
-
-        log.info("📊 Admin fetching payouts")
-
-        return jdbcTemplate.queryForList(
+        val data = jdbcTemplate.queryForList(
             """
             SELECT 
                 p.id,
@@ -93,8 +88,10 @@ class AdminController(
             JOIN properties pr ON pr.id = p.property_id
             JOIN users u ON u.id = p.landlord_id
             ORDER BY p.created_at DESC
-            """.trimIndent()
+            """
         )
+
+        return ResponseEntity.ok(data)
     }
 
     // =====================================================
@@ -102,20 +99,15 @@ class AdminController(
     // =====================================================
     @ResponseBody
     @GetMapping("/api/platform-wallet")
-    fun getPlatformWallet(authentication: Authentication?): Map<String, Any> {
+    fun getPlatformWallet(auth: Authentication?): ResponseEntity<Any> {
 
-        if (authentication == null) throw RuntimeException("Unauthorized")
-
-        val roles = authentication.authorities.map { it.authority }
-        if (!roles.contains("ROLE_ADMIN")) {
-            throw RuntimeException("Forbidden")
-        }
+        requireAdmin(auth)
 
         val balance = jdbcTemplate.queryForObject(
             "SELECT COALESCE(balance,0) FROM platform_wallet LIMIT 1",
             Double::class.java
         ) ?: 0.0
 
-        return mapOf("balance" to balance)
+        return ResponseEntity.ok(mapOf("balance" to balance))
     }
 }
