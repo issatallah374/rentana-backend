@@ -53,8 +53,8 @@ class MpesaService(
     }
 
     // =========================================================
-    // 🟢 C2B PAYMENTS (RENT)
-    // =========================================================
+// 🟢 C2B PAYMENTS (RENT)
+// =========================================================
     fun processC2BPayment(payload: Map<String, Any>) {
 
         try {
@@ -73,6 +73,8 @@ class MpesaService(
                 ?.replace("-", "")
                 ?: return log.error("❌ Missing account")
 
+            log.warn("🔥 C2B RECEIVED → ref=$reference amount=$amount account=$safeAccount phone=$phone")
+
             handlePayment(reference, amount, phone, safeAccount, payload)
 
         } catch (e: Exception) {
@@ -80,9 +82,10 @@ class MpesaService(
         }
     }
 
+
     // =========================================================
-    // 💰 RENT ENGINE
-    // =========================================================
+// 💰 RENT ENGINE
+// =========================================================
     private fun handlePayment(
         reference: String,
         amount: BigDecimal,
@@ -93,6 +96,11 @@ class MpesaService(
 
         try {
 
+            log.warn("🚀 START PAYMENT → ref=$reference account=$account amount=$amount")
+
+            // =====================================================
+            // 1. DUPLICATE CHECK
+            // =====================================================
             val exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM mpesa_transactions WHERE transaction_code = ?",
                 Int::class.java,
@@ -100,22 +108,25 @@ class MpesaService(
             ) ?: 0
 
             if (exists > 0) {
-                log.warn("⚠️ Duplicate ignored → $reference")
+                log.warn("⚠️ DUPLICATE PAYMENT IGNORED → $reference")
                 return
             }
 
+            // =====================================================
+            // 2. SAVE RAW TRANSACTION
+            // =====================================================
             jdbcTemplate.update(
                 """
-                INSERT INTO mpesa_transactions(
-                    transaction_code,
-                    phone_number,
-                    account_reference,
-                    amount,
-                    raw_payload,
-                    processed
-                )
-                VALUES (?, ?, ?, ?, ?::jsonb, false)
-                """.trimIndent(),
+            INSERT INTO mpesa_transactions(
+                transaction_code,
+                phone_number,
+                account_reference,
+                amount,
+                raw_payload,
+                processed
+            )
+            VALUES (?, ?, ?, ?, ?::jsonb, false)
+            """.trimIndent(),
                 reference,
                 phone,
                 account,
@@ -123,27 +134,56 @@ class MpesaService(
                 objectMapper.writeValueAsString(payload)
             )
 
+            log.info("📦 TRANSACTION SAVED → $reference")
+
+            // =====================================================
+            // 3. FIND UNIT
+            // =====================================================
             val unit = unitRepository.findByReferenceNumberIgnoreCase(account)
-                ?: return log.error("❌ Unit not found → $account")
 
-            val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
-                ?: return log.error("❌ No tenancy")
-
-            jdbcTemplate.execute(
-                "SELECT process_payment(?::uuid, ?::numeric, ?)"
-            ) { ps ->
-                ps.setObject(1, tenancy.id)
-                ps.setBigDecimal(2, amount)
-                ps.setString(3, reference)
-                ps.execute()
+            if (unit == null) {
+                log.error("❌ UNIT NOT FOUND → $account")
+                return
             }
 
+            log.info("🏢 UNIT FOUND → id=${unit.id}")
+
+            // =====================================================
+            // 4. FIND TENANCY
+            // =====================================================
+            val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
+
+            if (tenancy == null) {
+                log.error("❌ NO ACTIVE TENANCY → unit=${unit.id}")
+                return
+            }
+
+            log.info("🏠 TENANCY FOUND → id=${tenancy.id}")
+
+            // =====================================================
+            // 5. PROCESS PAYMENT (POSTGRES FUNCTION)
+            // =====================================================
+            val rows = jdbcTemplate.queryForObject(
+                "SELECT process_payment(?::uuid, ?::numeric, ?)",
+                Int::class.java,
+                tenancy.id,
+                amount,
+                reference
+            )
+
+            log.info("💰 DB FUNCTION EXECUTED → result=$rows")
+
+            // =====================================================
+            // 6. MARK AS PROCESSED
+            // =====================================================
             jdbcTemplate.update(
                 "UPDATE mpesa_transactions SET processed = true WHERE transaction_code = ?",
                 reference
             )
 
-            log.info("🎉 RENT PAYMENT SUCCESS → $reference")
+            log.info("✅ PAYMENT MARKED PROCESSED → $reference")
+
+            log.warn("🎉 RENT PAYMENT SUCCESS → ref=$reference amount=$amount")
 
         } catch (e: Exception) {
             log.error("❌ HANDLE PAYMENT FAILED → $reference", e)
