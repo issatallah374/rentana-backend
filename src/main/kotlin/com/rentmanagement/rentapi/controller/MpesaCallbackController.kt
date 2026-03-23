@@ -22,7 +22,6 @@ class MpesaCallbackController(
         @RequestBody request: StkPushRequest
     ): ResponseEntity<Map<String, String>> {
 
-        // 🔐 BASIC VALIDATION
         if (request.phone.isBlank() || request.landlordId.isBlank() || request.amount <= 0) {
             return ResponseEntity.badRequest().body(
                 mapOf("error" to "Invalid request data")
@@ -63,21 +62,30 @@ class MpesaCallbackController(
         @RequestBody payload: Map<String, Any>?
     ): ResponseEntity<Map<String, String>> {
 
-        // ⚠️ ALWAYS RESPOND FAST TO SAFARICOM
-        try {
+        log.info("🔥🔥🔥 STK CALLBACK RECEIVED 🔥🔥🔥")
 
-            if (payload == null) {
-                log.warn("⚠️ Empty STK callback received")
-            } else {
-                log.info("🔥 STK CALLBACK RECEIVED")
-                mpesaService.processSubscriptionCallback(payload)
-            }
+        if (payload == null) {
+            log.warn("⚠️ Empty STK callback received")
 
-        } catch (e: Exception) {
-            log.error("❌ STK CALLBACK ERROR", e)
+            return ResponseEntity.ok(
+                mapOf(
+                    "ResultCode" to "0",
+                    "ResultDesc" to "Accepted"
+                )
+            )
         }
 
-        // ✅ MUST ALWAYS RETURN SUCCESS (avoid retries storm)
+        log.info("📦 FULL CALLBACK PAYLOAD → {}", payload)
+
+        try {
+            // ✅ Just pass everything to service
+            mpesaService.processSubscriptionCallback(payload)
+
+        } catch (e: Exception) {
+            log.error("❌ STK CALLBACK PROCESSING FAILED", e)
+            // still return success to avoid retries
+        }
+
         return ResponseEntity.ok(
             mapOf(
                 "ResultCode" to "0",
@@ -95,8 +103,6 @@ class MpesaCallbackController(
     ): ResponseEntity<Map<String, String>> {
 
         log.info("🟢 C2B VALIDATION RECEIVED")
-
-        // 🔒 You can add rules here later (e.g. reject invalid accounts)
 
         return ResponseEntity.ok(
             mapOf(
@@ -127,7 +133,6 @@ class MpesaCallbackController(
             log.error("❌ C2B PROCESSING FAILED", e)
         }
 
-        // ✅ ALWAYS RETURN SUCCESS
         return ResponseEntity.ok(
             mapOf(
                 "ResultCode" to "0",
