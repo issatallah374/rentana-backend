@@ -57,43 +57,55 @@ class MpesaCallbackController(
     // =====================================================
     // 🔵 STK CALLBACK (SUBSCRIPTION ONLY)
     // =====================================================
-    @RequestMapping(
-        value = ["/stk-callback"],
-        method = [RequestMethod.POST, RequestMethod.GET],
-        consumes = ["application/json"],
-        produces = ["application/json"]
-    )
-    fun stkCallback(
+
+    /**
+     * ✅ Safaricom sends:
+     * - POST → actual payment callback
+     * - GET → sometimes ping/test
+     *
+     * We support BOTH safely.
+     */
+
+    @PostMapping("/stk-callback", consumes = ["application/json"])
+    fun stkCallbackPost(
         @RequestBody(required = false) payload: Map<String, Any>?
     ): ResponseEntity<Map<String, String>> {
 
-        log.info("🔥🔥🔥 STK CALLBACK RECEIVED 🔥🔥🔥")
+        log.info("🔥 STK CALLBACK (POST) RECEIVED")
 
-        // ✅ Handle GET / empty payload (Safaricom ping)
         if (payload == null) {
-            log.warn("⚠️ Empty callback (GET or ping)")
+            log.warn("⚠️ Empty POST callback payload")
+        } else {
+            log.info("📦 CALLBACK PAYLOAD → {}", payload)
 
-            return ResponseEntity.ok(
-                mapOf(
-                    "ResultCode" to "0",
-                    "ResultDesc" to "Accepted"
-                )
-            )
+            try {
+                mpesaService.processSubscriptionCallback(payload)
+            } catch (e: Exception) {
+                log.error("❌ STK CALLBACK PROCESSING FAILED", e)
+            }
         }
 
-        log.info("📦 FULL CALLBACK PAYLOAD → {}", payload)
-
-        try {
-            mpesaService.processSubscriptionCallback(payload)
-        } catch (e: Exception) {
-            log.error("❌ STK CALLBACK PROCESSING FAILED", e)
-        }
-
-        // ✅ ALWAYS respond success to Safaricom
+        // ALWAYS return success to Safaricom
         return ResponseEntity.ok(
             mapOf(
                 "ResultCode" to "0",
                 "ResultDesc" to "Accepted"
+            )
+        )
+    }
+
+    // =====================================================
+    // 🧪 STK CALLBACK GET (PING / TEST)
+    // =====================================================
+    @GetMapping("/stk-callback")
+    fun stkCallbackGet(): ResponseEntity<Map<String, String>> {
+
+        log.info("🌐 STK CALLBACK (GET PING) RECEIVED")
+
+        return ResponseEntity.ok(
+            mapOf(
+                "ResultCode" to "0",
+                "ResultDesc" to "Alive"
             )
         )
     }
@@ -106,7 +118,7 @@ class MpesaCallbackController(
         @RequestBody payload: Map<String, Any>?
     ): ResponseEntity<Map<String, String>> {
 
-        log.info("🟢 C2B VALIDATION RECEIVED")
+        log.info("🟢 C2B VALIDATION RECEIVED → {}", payload)
 
         return ResponseEntity.ok(
             mapOf(
@@ -129,7 +141,7 @@ class MpesaCallbackController(
             if (payload == null) {
                 log.warn("⚠️ Empty C2B confirmation")
             } else {
-                log.info("💰 C2B CONFIRMATION RECEIVED")
+                log.info("💰 C2B CONFIRMATION RECEIVED → {}", payload)
                 mpesaService.processC2BPayment(payload)
             }
 
