@@ -4,6 +4,7 @@ import com.rentmanagement.rentapi.dto.StkPushRequest
 import com.rentmanagement.rentapi.services.MpesaService
 import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.web.bind.annotation.*
 
 @RestController
@@ -59,6 +60,9 @@ class MpesaCallbackController(
         }
     }
 
+    @Value("\${mpesa.callbackUrl}")
+    lateinit var callbackUrl: String
+
     // =====================================================
     // 🔵 STK CALLBACK (SUBSCRIPTION ONLY)
     // =====================================================
@@ -93,10 +97,16 @@ class MpesaCallbackController(
     // =====================================================
     // 🧪 STK CALLBACK GET (PING / TEST)
     // =====================================================
+    // =====================================================
+// 🧪 STK CALLBACK GET (PING / TEST)
+// =====================================================
     @GetMapping("/stk-callback")
     fun stkCallbackGet(): ResponseEntity<Map<String, String>> {
 
         log.info("🌐 STK CALLBACK (GET PING) RECEIVED")
+
+        // 🔥 DEBUG ACTUAL VALUE FROM ENV
+        log.error("🔥 CALLBACK URL USED → '$callbackUrl'")
 
         return ResponseEntity.ok(
             mapOf(
@@ -152,4 +162,47 @@ class MpesaCallbackController(
             )
         )
     }
+
+    // =====================================================
+// 🟡 SAFARICOM CALLBACK (CURRENT URL)
+// =====================================================
+    @PostMapping("/subscription-callback", consumes = ["application/json"])
+    fun subscriptionCallback(
+        @RequestBody(required = false) payload: Map<String, Any>?
+    ): ResponseEntity<Map<String, String>> {
+
+        log.warn("⚠️ CALLBACK HIT → /subscription-callback")
+
+        if (payload == null) {
+            log.warn("⚠️ Empty callback payload")
+        } else {
+            log.info("📦 CALLBACK PAYLOAD → {}", payload)
+
+            try {
+                mpesaService.processSubscriptionCallback(payload)
+            } catch (e: Exception) {
+                log.error("❌ CALLBACK PROCESSING FAILED", e)
+            }
+        }
+
+        return ResponseEntity.ok(
+            mapOf(
+                "ResultCode" to "0",
+                "ResultDesc" to "Accepted"
+            )
+        )
+    }
+    @GetMapping("/subscription-callback")
+    fun subscriptionCallbackGet(): ResponseEntity<Map<String, String>> {
+
+        log.warn("🌐 SAFARICOM PING → /subscription-callback")
+
+        return ResponseEntity.ok(
+            mapOf(
+                "ResultCode" to "0",
+                "ResultDesc" to "Alive"
+            )
+        )
+    }
+
 }
