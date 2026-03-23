@@ -40,17 +40,20 @@ class SecurityConfig(
                 it.requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
                 // =========================
-                // ✅ PUBLIC AUTH
+                // ✅ PUBLIC AUTH + MPESA 🔥
                 // =========================
-                it.requestMatchers("/api/auth/**").permitAll()
+                it.requestMatchers(
+                    "/api/auth/**",
+                    "/api/mpesa/**"   // ✅ FIXED (correct placement)
+                ).permitAll()
 
                 // =========================
-                // ✅ ADMIN HTML (ALLOW LOAD)
+                // ✅ ADMIN HTML
                 // =========================
                 it.requestMatchers("/admin/**").permitAll()
 
                 // =========================
-                // 🔐 ADMIN APIs (STRICT)
+                // 🔐 ADMIN APIs
                 // =========================
                 it.requestMatchers("/api/admin/**").hasRole("ADMIN")
 
@@ -94,13 +97,8 @@ class SecurityConfig(
         val config = CorsConfiguration()
 
         config.allowedOrigins = listOf("*")
-
-        config.allowedMethods = listOf(
-            "GET", "POST", "PUT", "DELETE", "OPTIONS"
-        )
-
+        config.allowedMethods = listOf("GET", "POST", "PUT", "DELETE", "OPTIONS")
         config.allowedHeaders = listOf("*")
-
         config.allowCredentials = false
 
         val source = UrlBasedCorsConfigurationSource()

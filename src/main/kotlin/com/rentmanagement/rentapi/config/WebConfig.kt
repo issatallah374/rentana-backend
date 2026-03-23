@@ -12,5 +12,10 @@ class WebConfig(
 
     override fun addInterceptors(registry: InterceptorRegistry) {
         registry.addInterceptor(subscriptionInterceptor)
+            .excludePathPatterns(
+                "/api/mpesa/**",     // ✅ CRITICAL FIX
+                "/api/auth/**",
+                "/error"
+            )
     }
 }

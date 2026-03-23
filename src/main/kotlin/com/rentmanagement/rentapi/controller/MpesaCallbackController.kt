@@ -57,15 +57,21 @@ class MpesaCallbackController(
     // =====================================================
     // 🔵 STK CALLBACK (SUBSCRIPTION ONLY)
     // =====================================================
-    @PostMapping("/stk-callback", consumes = ["application/json"])
+    @RequestMapping(
+        value = ["/stk-callback"],
+        method = [RequestMethod.POST, RequestMethod.GET],
+        consumes = ["application/json"],
+        produces = ["application/json"]
+    )
     fun stkCallback(
-        @RequestBody payload: Map<String, Any>?
+        @RequestBody(required = false) payload: Map<String, Any>?
     ): ResponseEntity<Map<String, String>> {
 
         log.info("🔥🔥🔥 STK CALLBACK RECEIVED 🔥🔥🔥")
 
+        // ✅ Handle GET / empty payload (Safaricom ping)
         if (payload == null) {
-            log.warn("⚠️ Empty STK callback received")
+            log.warn("⚠️ Empty callback (GET or ping)")
 
             return ResponseEntity.ok(
                 mapOf(
@@ -78,14 +84,12 @@ class MpesaCallbackController(
         log.info("📦 FULL CALLBACK PAYLOAD → {}", payload)
 
         try {
-            // ✅ Just pass everything to service
             mpesaService.processSubscriptionCallback(payload)
-
         } catch (e: Exception) {
             log.error("❌ STK CALLBACK PROCESSING FAILED", e)
-            // still return success to avoid retries
         }
 
+        // ✅ ALWAYS respond success to Safaricom
         return ResponseEntity.ok(
             mapOf(
                 "ResultCode" to "0",

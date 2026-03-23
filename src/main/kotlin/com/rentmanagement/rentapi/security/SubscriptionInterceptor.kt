@@ -25,11 +25,11 @@ class SubscriptionInterceptor(
         val path = request.requestURI
 
         // =====================================================
-        // ✅ PUBLIC / SAFE ENDPOINTS (CRITICAL 🔥)
+        // ✅ PUBLIC / SAFE ENDPOINTS
         // =====================================================
         if (
             path.startsWith("/api/auth") ||
-            path.startsWith("/api/mpesa") ||           // 🔥 FIX → allow STK + callbacks
+            path.startsWith("/api/mpesa") ||       // ✅ MPESA SAFE
             path.startsWith("/api/subscriptions") ||
             path.startsWith("/error")
         ) {
@@ -39,7 +39,7 @@ class SubscriptionInterceptor(
         val authHeader = request.getHeader("Authorization")
 
         // =====================================================
-        // ✅ NO TOKEN → ALLOW (handled by security later)
+        // ✅ NO TOKEN → LET SECURITY HANDLE
         // =====================================================
         if (authHeader.isNullOrBlank() || !authHeader.startsWith("Bearer ")) {
             return true
@@ -66,7 +66,7 @@ class SubscriptionInterceptor(
 
                 log.warn("❌ Subscription required → user=$userId path=$path")
 
-                // ✅ allow wallet access even if expired
+                // ✅ allow wallet even if expired
                 if (path.contains("/wallet")) {
                     return true
                 }
