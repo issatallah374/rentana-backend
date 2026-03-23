@@ -27,26 +27,29 @@ class MpesaService(
     private val objectMapper = ObjectMapper()
 
     // =========================================================
-    // 🔥 STK INIT
+    // 🔥 STK INIT (SUBSCRIPTION ONLY)
     // =========================================================
     fun initiateStkPush(phone: String, amount: Double, landlordId: String) {
         try {
 
+            val landlordUUID = UUID.fromString(landlordId)
+
             mpesaStkService.stkPush(
                 phone = phone,
-                amount = BigDecimal(amount),
-                landlordId = UUID.fromString(landlordId)
+                amount = BigDecimal.valueOf(amount),
+                landlordId = landlordUUID
             )
 
-            log.info("🔥 STK TRIGGERED")
+            log.info("🔥 STK TRIGGERED → landlord=$landlordUUID amount=$amount")
 
         } catch (e: Exception) {
             log.error("❌ STK FAILED", e)
+            throw e
         }
     }
 
     // =========================================================
-    // 🔵 STK CALLBACK (APP PAYMENTS)
+    // 🔵 STK CALLBACK (RENT PAYMENTS)
     // =========================================================
     fun processPaymentCallback(payload: Map<String, Any>) {
 
@@ -60,8 +63,9 @@ class MpesaService(
                 ?: return log.error("❌ Missing stkCallback")
 
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
+
             if (resultCode != 0) {
-                log.warn("❌ STK Payment failed")
+                log.warn("❌ STK Payment failed → code=$resultCode")
                 return
             }
 
@@ -93,7 +97,7 @@ class MpesaService(
                 ?.replace("-", "")
                 ?: return log.error("❌ Missing account")
 
-            log.info("💰 STK → $safeAmount | $safeAccount | $safeReference")
+            log.info("💰 STK PAYMENT → amount=$safeAmount ref=$safeReference account=$safeAccount")
 
             handlePayment(safeReference, safeAmount, phone, safeAccount, payload)
 
@@ -110,7 +114,6 @@ class MpesaService(
         try {
 
             log.info("🔥 ===== C2B PAYMENT START =====")
-            log.info("📦 Payload: $payload")
 
             val reference = payload["TransID"]?.toString()
                 ?: return log.error("❌ Missing TransID")
@@ -126,7 +129,7 @@ class MpesaService(
                 ?.replace("-", "")
                 ?: return log.error("❌ Missing account")
 
-            log.info("💰 C2B → $amount | $safeAccount | $reference")
+            log.info("💰 C2B PAYMENT → amount=$amount ref=$reference account=$safeAccount")
 
             handlePayment(reference, amount, phone, safeAccount, payload)
 
@@ -136,7 +139,7 @@ class MpesaService(
     }
 
     // =========================================================
-    // 💰 CORE HANDLER (USED BY BOTH STK + C2B)
+    // 💰 CORE PAYMENT ENGINE
     // =========================================================
     private fun handlePayment(
         reference: String,
@@ -148,7 +151,7 @@ class MpesaService(
 
         try {
 
-            // 🛑 DUPLICATE CHECK
+            // 🔐 IDEMPOTENCY CHECK
             val exists = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM mpesa_transactions WHERE transaction_code = ?",
                 Int::class.java,
@@ -160,12 +163,19 @@ class MpesaService(
                 return
             }
 
-            // 💾 SAVE RAW
+            // 💾 STORE RAW TRANSACTION
             jdbcTemplate.update(
                 """
-                INSERT INTO mpesa_transactions(transaction_code, phone_number, account_reference, amount, raw_payload, processed)
+                INSERT INTO mpesa_transactions(
+                    transaction_code,
+                    phone_number,
+                    account_reference,
+                    amount,
+                    raw_payload,
+                    processed
+                )
                 VALUES (?, ?, ?, ?, ?::jsonb, false)
-                """,
+                """.trimIndent(),
                 reference,
                 phone,
                 account,
@@ -173,18 +183,18 @@ class MpesaService(
                 objectMapper.writeValueAsString(payload)
             )
 
-            log.info("💾 Saved transaction")
+            log.info("💾 Transaction stored → $reference")
 
             // 🔍 FIND UNIT
             val unit = unitRepository.findByReferenceNumberIgnoreCase(account)
                 ?: return log.error("❌ Unit not found → $account")
 
             val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
-                ?: return log.error("❌ No active tenancy")
+                ?: return log.error("❌ No active tenancy → unit=${unit.id}")
 
-            log.info("🏠 Unit=${unit.id} Tenancy=${tenancy.id}")
+            log.info("🏠 MATCH → unit=${unit.id} tenancy=${tenancy.id}")
 
-            // 💰 DB ENGINE
+            // ⚙️ CALL DB FUNCTION
             jdbcTemplate.execute(
                 "SELECT process_payment(?::uuid, ?::numeric, ?)"
             ) { ps ->
@@ -194,34 +204,39 @@ class MpesaService(
                 ps.execute()
             }
 
-            log.info("🎉 PAYMENT SUCCESS")
-
             // ✅ MARK PROCESSED
             jdbcTemplate.update(
                 "UPDATE mpesa_transactions SET processed = true WHERE transaction_code = ?",
                 reference
             )
 
+            log.info("🎉 PAYMENT SUCCESS → $reference")
+
         } catch (e: Exception) {
-            log.error("❌ HANDLE PAYMENT FAILED", e)
+            log.error("❌ HANDLE PAYMENT FAILED → ref=$reference", e)
         }
     }
 
     // =========================================================
-    // 🟢 SUBSCRIPTION CALLBACK
+    // 🟢 SUBSCRIPTION CALLBACK (STK ONLY)
     // =========================================================
     fun processSubscriptionCallback(payload: Map<String, Any>) {
 
         try {
 
+            log.info("🔥 ===== SUBSCRIPTION CALLBACK START =====")
+
             val callback = payload["Body"]
                 ?.let { it as? Map<*, *> }
-                ?.get("stkCallback") as? Map<*, *> ?: return
+                ?.get("stkCallback") as? Map<*, *>
+                ?: return log.error("❌ Missing stkCallback")
 
             val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
             val checkoutId = callback["CheckoutRequestID"]?.toString()
 
             if (resultCode != 0) {
+
+                log.warn("❌ SUBSCRIPTION FAILED → checkout=$checkoutId")
 
                 checkoutId?.let {
                     stkRequestRepository.findByCheckoutRequestId(it)?.apply {
@@ -235,7 +250,8 @@ class MpesaService(
 
             val items = callback["CallbackMetadata"]
                 ?.let { it as? Map<*, *> }
-                ?.get("Item") as? List<Map<String, Any>> ?: return
+                ?.get("Item") as? List<Map<String, Any>>
+                ?: return log.error("❌ Missing metadata")
 
             var amount: BigDecimal? = null
             var reference: String? = null
@@ -251,16 +267,21 @@ class MpesaService(
             val safeReference = reference ?: return
             val safeCheckoutId = checkoutId ?: return
 
+            // 🔐 IDEMPOTENCY
+            if (platformTransactionRepository.existsByReference(safeReference)) {
+                log.warn("⚠️ Duplicate subscription ignored → $safeReference")
+                return
+            }
+
             val stkRequest = stkRequestRepository.findByCheckoutRequestId(safeCheckoutId)
                 ?: throw RuntimeException("STK request not found")
 
             val landlord = userRepository.findById(stkRequest.landlordId).orElseThrow()
 
-            if (platformTransactionRepository.existsByReference(safeReference)) return
-
             val plan = subscriptionPlanRepository.findMatchingPlan(safeAmount)
-                ?: throw RuntimeException("Plan not found")
+                ?: throw RuntimeException("Plan not found for amount=$safeAmount")
 
+            // 💾 SAVE PLATFORM TX
             platformTransactionRepository.save(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
@@ -270,16 +291,19 @@ class MpesaService(
                 )
             )
 
+            // 💰 UPDATE WALLET
             jdbcTemplate.update(
                 "UPDATE platform_wallet SET balance = balance + ?",
                 safeAmount
             )
 
+            // 🔄 EXPIRE OLD
             jdbcTemplate.update(
                 "UPDATE subscriptions SET status = 'EXPIRED' WHERE landlord_id = ? AND status = 'ACTIVE'",
                 landlord.id
             )
 
+            // 🆕 CREATE NEW
             val start = LocalDateTime.now()
             val end = start.plusMonths(1)
 
@@ -294,7 +318,7 @@ class MpesaService(
                     status
                 )
                 VALUES (?, ?, ?, ?, ?, 'ACTIVE')
-                """,
+                """.trimIndent(),
                 UUID.randomUUID(),
                 landlord.id,
                 plan.id,
@@ -302,13 +326,14 @@ class MpesaService(
                 end
             )
 
+            // ✅ MARK SUCCESS
             stkRequest.status = "SUCCESS"
             stkRequestRepository.save(stkRequest)
 
-            log.info("🎉 SUBSCRIPTION ACTIVATED")
+            log.info("🎉 SUBSCRIPTION ACTIVATED → landlord=${landlord.id}")
 
         } catch (e: Exception) {
-            log.error("❌ Subscription callback crashed", e)
+            log.error("❌ SUBSCRIPTION CALLBACK FAILED", e)
         }
     }
 }

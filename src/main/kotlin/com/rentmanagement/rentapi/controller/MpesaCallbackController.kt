@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
 @RestController
+@RequestMapping("/api/mpesa")
 class MpesaCallbackController(
     private val mpesaService: MpesaService
 ) {
@@ -14,85 +15,124 @@ class MpesaCallbackController(
     private val log = LoggerFactory.getLogger(MpesaCallbackController::class.java)
 
     // =====================================================
-    // 🔥 STK PUSH (APP INITIATED)
+    // 🔥 STK PUSH (SUBSCRIPTION ONLY)
     // =====================================================
-    @PostMapping("/api/mpesa/stk")
+    @PostMapping("/stk", consumes = ["application/json"])
     fun triggerStk(
         @RequestBody request: StkPushRequest
     ): ResponseEntity<Map<String, String>> {
 
-        mpesaService.initiateStkPush(
-            request.phone,
-            request.amount,
-            request.landlordId
+        // 🔐 BASIC VALIDATION
+        if (request.phone.isBlank() || request.landlordId.isBlank() || request.amount <= 0) {
+            return ResponseEntity.badRequest().body(
+                mapOf("error" to "Invalid request data")
+            )
+        }
+
+        log.info(
+            "📲 STK REQUEST → phone=${request.phone}, amount=${request.amount}, landlord=${request.landlordId}"
         )
 
-        return ResponseEntity.ok(mapOf("message" to "STK push sent"))
+        return try {
+
+            mpesaService.initiateStkPush(
+                request.phone,
+                request.amount,
+                request.landlordId
+            )
+
+            ResponseEntity.ok(
+                mapOf("message" to "STK push sent successfully")
+            )
+
+        } catch (e: Exception) {
+
+            log.error("❌ STK TRIGGER FAILED", e)
+
+            ResponseEntity.internalServerError().body(
+                mapOf("error" to "Failed to initiate STK push")
+            )
+        }
     }
 
     // =====================================================
-    // 🔵 STK CALLBACK
+    // 🔵 STK CALLBACK (SUBSCRIPTION ONLY)
     // =====================================================
-    @PostMapping("/api/mpesa/payment-callback")
-    fun paymentCallback(
-        @RequestBody payload: Map<String, Any>
+    @PostMapping("/stk-callback", consumes = ["application/json"])
+    fun stkCallback(
+        @RequestBody payload: Map<String, Any>?
     ): ResponseEntity<Map<String, String>> {
 
-        log.info("🔥 STK CALLBACK RECEIVED → $payload")
+        // ⚠️ ALWAYS RESPOND FAST TO SAFARICOM
+        try {
 
-        mpesaService.processPaymentCallback(payload)
+            if (payload == null) {
+                log.warn("⚠️ Empty STK callback received")
+            } else {
+                log.info("🔥 STK CALLBACK RECEIVED")
+                mpesaService.processSubscriptionCallback(payload)
+            }
 
+        } catch (e: Exception) {
+            log.error("❌ STK CALLBACK ERROR", e)
+        }
+
+        // ✅ MUST ALWAYS RETURN SUCCESS (avoid retries storm)
         return ResponseEntity.ok(
-            mapOf("ResultCode" to "0", "ResultDesc" to "Accepted")
+            mapOf(
+                "ResultCode" to "0",
+                "ResultDesc" to "Accepted"
+            )
         )
     }
 
     // =====================================================
-    // 🟢 C2B VALIDATION (PAYBILL)
+    // 🟢 C2B VALIDATION (PAYBILL - RENT)
     // =====================================================
-    @PostMapping("/api/c2b/validation")
+    @PostMapping("/c2b/validation", consumes = ["application/json"])
     fun c2bValidation(
-        @RequestBody payload: Map<String, Any>
+        @RequestBody payload: Map<String, Any>?
     ): ResponseEntity<Map<String, String>> {
 
-        log.info("🟢 C2B VALIDATION → $payload")
+        log.info("🟢 C2B VALIDATION RECEIVED")
+
+        // 🔒 You can add rules here later (e.g. reject invalid accounts)
 
         return ResponseEntity.ok(
-            mapOf("ResultCode" to "0", "ResultDesc" to "Accepted")
+            mapOf(
+                "ResultCode" to "0",
+                "ResultDesc" to "Accepted"
+            )
         )
     }
 
     // =====================================================
-    // 🟢 C2B CONFIRMATION
+    // 💰 C2B CONFIRMATION (RENT PAYMENTS)
     // =====================================================
-    @PostMapping("/api/c2b/confirmation")
+    @PostMapping("/c2b/confirmation", consumes = ["application/json"])
     fun c2bConfirmation(
-        @RequestBody payload: Map<String, Any>
+        @RequestBody payload: Map<String, Any>?
     ): ResponseEntity<Map<String, String>> {
 
-        log.info("💰 C2B CONFIRMATION RECEIVED → $payload")
+        try {
 
-        mpesaService.processC2BPayment(payload)
+            if (payload == null) {
+                log.warn("⚠️ Empty C2B confirmation")
+            } else {
+                log.info("💰 C2B CONFIRMATION RECEIVED")
+                mpesaService.processC2BPayment(payload)
+            }
 
+        } catch (e: Exception) {
+            log.error("❌ C2B PROCESSING FAILED", e)
+        }
+
+        // ✅ ALWAYS RETURN SUCCESS
         return ResponseEntity.ok(
-            mapOf("ResultCode" to "0", "ResultDesc" to "Accepted")
-        )
-    }
-
-    // =====================================================
-    // 🟢 SUBSCRIPTION CALLBACK
-    // =====================================================
-    @PostMapping("/api/mpesa/subscription-callback")
-    fun subscriptionCallback(
-        @RequestBody payload: Map<String, Any>
-    ): ResponseEntity<Map<String, String>> {
-
-        log.info("🟢 SUBSCRIPTION CALLBACK → $payload")
-
-        mpesaService.processSubscriptionCallback(payload)
-
-        return ResponseEntity.ok(
-            mapOf("ResultCode" to "0", "ResultDesc" to "Accepted")
+            mapOf(
+                "ResultCode" to "0",
+                "ResultDesc" to "Accepted"
+            )
         )
     }
 }

@@ -159,7 +159,8 @@ class PayoutService(
     }
 
     // =====================================================
-// 🔥 ADMIN MARK AS PAID (SECURE VERSION)
+// =====================================================
+// 🔥 ADMIN MARK AS PAID (CORRECT + SECURE)
 // =====================================================
     @Transactional
     fun markAsPaid(
@@ -174,6 +175,7 @@ class PayoutService(
             throw BadRequestException("National ID is required")
         }
 
+        // 🔒 Lock payout row
         val payout = jdbcTemplate.queryForMap(
             "SELECT * FROM payout_requests WHERE id = ? FOR UPDATE",
             payoutId
@@ -184,24 +186,23 @@ class PayoutService(
         }
 
         val propertyId = UUID.fromString(payout["property_id"].toString())
-        val landlordId = UUID.fromString(payout["landlord_id"].toString())
         val amount = BigDecimal(payout["amount"].toString())
 
         // =====================================================
-        // 🔐 VERIFY NATIONAL ID (🔥 CORE SECURITY FIX)
+        // 🔐 VERIFY ADMIN NATIONAL ID (✅ CORRECT USER)
         // =====================================================
-        val nationalIdHash = jdbcTemplate.queryForObject(
+        val adminNationalIdHash = jdbcTemplate.queryForObject(
             "SELECT national_id_hash FROM users WHERE id = ?",
             String::class.java,
-            landlordId
-        ) ?: throw BadRequestException("User has no National ID set")
+            adminId
+        ) ?: throw BadRequestException("Admin has no National ID set")
 
         val encoder = org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
 
-        val isValid = encoder.matches(nationalId, nationalIdHash)
+        val isValid = encoder.matches(nationalId, adminNationalIdHash)
 
         if (!isValid) {
-            log.warn("❌ INVALID NATIONAL ID → payout=$payoutId landlord=$landlordId")
+            log.warn("❌ INVALID ADMIN NATIONAL ID → payout=$payoutId admin=$adminId")
             throw BadRequestException("Invalid National ID")
         }
 
@@ -233,7 +234,7 @@ class PayoutService(
         )
 
         // =====================================================
-        // ✅ UPDATE PAYOUT (DO NOT STORE RAW ID 🔥)
+        // ✅ UPDATE PAYOUT (SAFE)
         // =====================================================
         jdbcTemplate.update(
             """
@@ -255,12 +256,16 @@ class PayoutService(
 
 
     // =====================================================
-// ❌ REJECT PAYOUT (UNCHANGED BUT CLEAN)
+// =====================================================
+// ❌ REJECT PAYOUT (IMPROVED)
 // =====================================================
     @Transactional
-    fun rejectPayout(payoutId: UUID) {
+    fun rejectPayout(
+        payoutId: UUID,
+        adminId: UUID
+    ) {
 
-        log.info("❌ Reject payout → id=$payoutId")
+        log.info("❌ Reject payout → id=$payoutId admin=$adminId")
 
         val payout = jdbcTemplate.queryForMap(
             "SELECT status FROM payout_requests WHERE id = ? FOR UPDATE",
@@ -277,12 +282,15 @@ class PayoutService(
             """
         UPDATE payout_requests
         SET status = 'REJECTED',
-            processed_at = ?
+            processed_at = ?,
+            processed_by = ?
         WHERE id = ?
         """.trimIndent(),
             now,
+            adminId,
             payoutId
         )
 
         log.info("✅ payout rejected → id=$payoutId")
-    }}
+    }
+}
