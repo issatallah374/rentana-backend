@@ -7,14 +7,17 @@ import com.rentmanagement.rentapi.services.MpesaStkService
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import java.util.UUID
+import java.security.Principal
+import com.rentmanagement.rentapi.repository.PropertyRepository
 
 @RestController
 @RequestMapping("/api/payments")
 class PaymentController(
     private val paymentRepository: PaymentRepository,
     private val mpesaStkService: MpesaStkService,
-    private val subscriptionPlanRepository: SubscriptionPlanRepository
-) {
+    private val subscriptionPlanRepository: SubscriptionPlanRepository,
+    private val propertyRepository: PropertyRepository
+){
 
     // =========================
     // 📄 TENANCY PAYMENTS
@@ -43,11 +46,21 @@ class PaymentController(
     // =========================
     @GetMapping("/property/{propertyId}")
     fun getPaymentsByProperty(
-        @PathVariable propertyId: String
+        @PathVariable propertyId: String,
+        principal: Principal
     ): List<PaymentResponse> {
 
+        val userId = UUID.fromString(principal.name)
+
+        val property = propertyRepository.findById(UUID.fromString(propertyId))
+            .orElseThrow { RuntimeException("Property not found") }
+
+        if (property.landlord.id != userId) {
+            throw RuntimeException("Forbidden")
+        }
+
         return paymentRepository
-            .findByPropertyId(UUID.fromString(propertyId))
+            .findByPropertyId(property.id!!)
             .map {
                 PaymentResponse(
                     id = it.id!!,

@@ -36,6 +36,14 @@ data class Payment(
     @Column(name = "payment_date", nullable = false)
     val paymentDate: LocalDateTime,
 
+    @Column(name = "status")
+    val status: String = "SUCCESS", // or PENDING / FAILED
+
+    @Column(name = "processed_at")
+    val processedAt: LocalDateTime = LocalDateTime.now(),
+
     @Column(name = "created_at")
     val createdAt: LocalDateTime = LocalDateTime.now()
+
+
 )
