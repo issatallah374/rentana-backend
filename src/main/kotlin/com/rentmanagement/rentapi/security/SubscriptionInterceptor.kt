@@ -29,7 +29,7 @@ class SubscriptionInterceptor(
         // =====================================================
         if (
             path.startsWith("/api/auth") ||
-            path.startsWith("/api/mpesa") ||       // ✅ MPESA SAFE
+            path.startsWith("/api/mpesa") ||       // MPESA callbacks
             path.startsWith("/api/subscriptions") ||
             path.startsWith("/error")
         ) {
@@ -39,7 +39,7 @@ class SubscriptionInterceptor(
         val authHeader = request.getHeader("Authorization")
 
         // =====================================================
-        // ✅ NO TOKEN → LET SECURITY HANDLE
+        // ✅ NO TOKEN → LET SPRING SECURITY HANDLE
         // =====================================================
         if (authHeader.isNullOrBlank() || !authHeader.startsWith("Bearer ")) {
             return true
@@ -50,7 +50,25 @@ class SubscriptionInterceptor(
         try {
 
             val userId = jwtUtil.extractUserId(token)
+            val role = jwtUtil.extractRole(token) // 🔥 REQUIRED
 
+            // =====================================================
+            // ✅ ADMIN BYPASS (CRITICAL FIX)
+            // =====================================================
+            if (role == "ADMIN") {
+                return true
+            }
+
+            // =====================================================
+            // ✅ ADMIN ROUTES BYPASS (EXTRA SAFETY)
+            // =====================================================
+            if (path.startsWith("/admin")) {
+                return true
+            }
+
+            // =====================================================
+            // 🔍 CHECK SUBSCRIPTION (LANDLORD ONLY)
+            // =====================================================
             val sub = subscriptionRepository
                 .findTopByLandlordIdOrderByCreatedAtDesc(userId)
 
@@ -66,7 +84,7 @@ class SubscriptionInterceptor(
 
                 log.warn("❌ Subscription required → user=$userId path=$path")
 
-                // ✅ allow wallet even if expired
+                // ✅ allow wallet access even if expired
                 if (path.contains("/wallet")) {
                     return true
                 }
@@ -84,7 +102,7 @@ class SubscriptionInterceptor(
 
             log.error("❌ Subscription check failed", e)
 
-            // 🚫 NEVER BLOCK on error
+            // 🚫 NEVER BLOCK on unexpected errors
             return true
         }
     }
