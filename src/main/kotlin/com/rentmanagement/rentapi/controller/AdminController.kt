@@ -1,7 +1,6 @@
 package com.rentmanagement.rentapi.controller
 
 import org.slf4j.LoggerFactory
-import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.security.core.Authentication
@@ -18,7 +17,7 @@ class AdminController(
     private val log = LoggerFactory.getLogger(AdminController::class.java)
 
     // =====================================================
-    // 🔐 AUTH HELPERS (CLEAN 🔥)
+    // 🔐 AUTH HELPERS
     // =====================================================
     private fun requireAdmin(auth: Authentication?): UUID {
         if (auth == null || auth.name.isNullOrBlank()) {
@@ -46,7 +45,7 @@ class AdminController(
     fun index(): String = "admin/index"
 
     // =====================================================
-    // 📊 DASHBOARD
+    // 📊 DASHBOARD ROUTES
     // =====================================================
     @GetMapping("/dashboard")
     fun dashboard(): String = "admin/dashboard"
@@ -61,7 +60,7 @@ class AdminController(
     fun wallet(): String = "admin/dashboard"
 
     // =====================================================
-    // 💸 GET PAYOUTS
+    // 💸 GET ALL PAYOUTS (🔥 FIXED)
     // =====================================================
     @ResponseBody
     @GetMapping("/api/payouts")
@@ -79,14 +78,29 @@ class AdminController(
                 u.email AS landlord_email,
                 p.amount,
                 p.method,
-                p.destination,
                 p.status,
                 p.national_id,
                 p.created_at,
-                p.processed_at
+                p.processed_at,
+
+                -- 🔥 WALLET DETAILS
+                w.bank_name,
+                w.account_number,
+                w.mpesa_phone,
+
+                -- 🔥 OPTIONAL: COMPUTED DESTINATION
+                CASE 
+                    WHEN p.method = 'BANK' THEN 
+                        COALESCE(w.bank_name, '-') || ' (' || COALESCE(w.account_number, '-') || ')'
+                    ELSE 
+                        COALESCE(w.mpesa_phone, '-')
+                END AS destination
+
             FROM payout_requests p
             JOIN properties pr ON pr.id = p.property_id
             JOIN users u ON u.id = p.landlord_id
+            LEFT JOIN wallets w ON w.property_id = p.property_id
+
             ORDER BY p.created_at DESC
             """
         )
