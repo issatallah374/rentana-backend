@@ -12,4 +12,7 @@ interface AllTenantProjection {
     val startDate: LocalDate
     val isActive: Boolean
     val balance: Double
+
+    val status: String?   // ✅ nullable safety improvement
+
 }
