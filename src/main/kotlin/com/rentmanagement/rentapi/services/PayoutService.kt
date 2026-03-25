@@ -6,11 +6,11 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
-import com.rentmanagement.rentapi.repository.WalletRepository
-import org.springframework.security.crypto.password.PasswordEncoder
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.*
+import com.rentmanagement.rentapi.repository.WalletRepository
+import org.springframework.security.crypto.password.PasswordEncoder
 
 @Service
 class PayoutService(
@@ -20,12 +20,11 @@ class PayoutService(
 ) {
 
     private val log = LoggerFactory.getLogger(PayoutService::class.java)
-
     private val kenyaZone = ZoneId.of("Africa/Nairobi")
 
     // =====================================================
-// 💸 REQUEST PAYOUT
-// =====================================================
+    // 💸 REQUEST PAYOUT (FINAL)
+    // =====================================================
     @Transactional
     fun requestPayout(
         landlordId: UUID,
@@ -58,34 +57,45 @@ class PayoutService(
         ) ?: 0
 
         if (ownsProperty == 0) {
-            throw BadRequestException("You are not authorized for this property")
+            throw BadRequestException("Unauthorized property access")
         }
 
         // ===============================
-        // 🔐 PIN VALIDATION (CRITICAL)
+        // 🔐 PIN VALIDATION (🔥 FIXED)
         // ===============================
+        val wallet = walletRepository.findByPropertyId(propertyId)
+            ?: throw BadRequestException("Wallet not found")
 
+        if (wallet.pinHash.isNullOrBlank()) {
+            throw BadRequestException("PIN not set")
+        }
+
+        val isValidPin = passwordEncoder.matches(pin, wallet.pinHash)
+
+        if (!isValidPin) {
+            throw BadRequestException("Invalid PIN")
+        }
 
         // ===============================
-        // 💰 CORRECT WALLET BALANCE (LEDGER = SOURCE OF TRUTH)
+        // 💰 BALANCE (SAFE - NO FOR UPDATE)
         // ===============================
         val balance = jdbcTemplate.queryForObject(
             """
-        SELECT COALESCE(SUM(
-            CASE
-                WHEN entry_type = 'CREDIT' THEN amount
-                WHEN entry_type = 'DEBIT' AND category IN ('PAYOUT', 'WITHDRAWAL') THEN -amount
-                ELSE 0
-            END
-        ), 0)
-        FROM ledger_entries
-        WHERE property_id = ?
-        """.trimIndent(),
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN entry_type = 'CREDIT' THEN amount
+                    WHEN entry_type = 'DEBIT' AND category IN ('PAYOUT') THEN -amount
+                    ELSE 0
+                END
+            ), 0)
+            FROM ledger_entries
+            WHERE property_id = ?
+            """.trimIndent(),
             BigDecimal::class.java,
             propertyId
         ) ?: BigDecimal.ZERO
 
-        log.info("💰 Current balance → $balance")
+        log.info("💰 Balance = $balance")
 
         if (balance <= BigDecimal.ZERO) {
             throw BadRequestException("No funds available")
@@ -95,14 +105,25 @@ class PayoutService(
             throw BadRequestException("Insufficient balance")
         }
 
-        // 🔒 SAFETY BUFFER
-        val minimumRemaining = BigDecimal("1")
-        if (balance.subtract(amount) < minimumRemaining) {
-            throw BadRequestException("Leave at least KES 1 in wallet")
+        // ===============================
+        // 🚫 PREVENT MULTIPLE REQUESTS
+        // ===============================
+        val pending = jdbcTemplate.queryForObject(
+            """
+            SELECT COUNT(*) 
+            FROM payout_requests 
+            WHERE property_id = ? AND status = 'PENDING'
+            """.trimIndent(),
+            Int::class.java,
+            propertyId
+        ) ?: 0
+
+        if (pending > 0) {
+            throw BadRequestException("You already have a pending payout")
         }
 
         // ===============================
-        // ✅ GET PAYOUT METHOD
+        // 💳 PAYOUT METHOD
         // ===============================
         val payoutDetails = jdbcTemplate.queryForMap(
             "SELECT mpesa_phone, account_number FROM wallets WHERE property_id = ?",
@@ -115,45 +136,28 @@ class PayoutService(
         val (method, destination) = when {
             !mpesa.isNullOrBlank() -> "MPESA" to mpesa
             !bank.isNullOrBlank() -> "BANK" to bank
-            else -> throw BadRequestException("Please complete payout setup first")
+            else -> throw BadRequestException("Complete payout setup first")
         }
 
         // ===============================
-        // 🚫 PREVENT MULTIPLE REQUESTS
-        // ===============================
-        val pending = jdbcTemplate.queryForObject(
-            """
-        SELECT COUNT(*) 
-        FROM payout_requests 
-        WHERE property_id = ? AND status = 'PENDING'
-        """.trimIndent(),
-            Int::class.java,
-            propertyId
-        ) ?: 0
-
-        if (pending > 0) {
-            throw BadRequestException("You already have a pending payout")
-        }
-
-        // ===============================
-        // 💾 INSERT PAYOUT REQUEST
+        // 💾 SAVE REQUEST
         // ===============================
         val now = LocalDateTime.now(kenyaZone)
 
         jdbcTemplate.update(
             """
-        INSERT INTO payout_requests (
-            id,
-            landlord_id,
-            property_id,
-            amount,
-            method,
-            destination,
-            status,
-            created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
-        """.trimIndent(),
+            INSERT INTO payout_requests (
+                id,
+                landlord_id,
+                property_id,
+                amount,
+                method,
+                destination,
+                status,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
+            """.trimIndent(),
             UUID.randomUUID(),
             landlordId,
             propertyId,
@@ -167,9 +171,8 @@ class PayoutService(
     }
 
     // =====================================================
-// =====================================================
-// 🔥 ADMIN MARK AS PAID (CORRECT + SECURE)
-// =====================================================
+    // 🔥 ADMIN MARK AS PAID
+    // =====================================================
     @Transactional
     fun markAsPaid(
         payoutId: UUID,
@@ -177,62 +180,52 @@ class PayoutService(
         nationalId: String
     ) {
 
-        log.info("🔥 Mark payout as PAID → id=$payoutId admin=$adminId")
+        log.info("🔥 Mark payout PAID → id=$payoutId")
 
         if (nationalId.isBlank()) {
-            throw BadRequestException("National ID is required")
+            throw BadRequestException("National ID required")
         }
 
-        // 🔒 Lock payout row
         val payout = jdbcTemplate.queryForMap(
             "SELECT * FROM payout_requests WHERE id = ? FOR UPDATE",
             payoutId
         )
 
         if (payout["status"] != "PENDING") {
-            throw BadRequestException("Payout already processed")
+            throw BadRequestException("Already processed")
         }
 
         val propertyId = UUID.fromString(payout["property_id"].toString())
         val amount = BigDecimal(payout["amount"].toString())
 
-        // =====================================================
-        // 🔐 VERIFY ADMIN NATIONAL ID (✅ CORRECT USER)
-        // =====================================================
-        val adminNationalIdHash = jdbcTemplate.queryForObject(
+        // 🔐 VERIFY ADMIN ID
+        val hash = jdbcTemplate.queryForObject(
             "SELECT national_id_hash FROM users WHERE id = ?",
             String::class.java,
             adminId
-        ) ?: throw BadRequestException("Admin has no National ID set")
+        ) ?: throw BadRequestException("Admin not configured")
 
-        val encoder = org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder()
-
-        val isValid = encoder.matches(nationalId, adminNationalIdHash)
-
-        if (!isValid) {
-            log.warn("❌ INVALID ADMIN NATIONAL ID → payout=$payoutId admin=$adminId")
+        if (!passwordEncoder.matches(nationalId, hash)) {
             throw BadRequestException("Invalid National ID")
         }
 
         val now = LocalDateTime.now(kenyaZone)
 
-        // =====================================================
-        // ✅ WRITE LEDGER (SOURCE OF TRUTH)
-        // =====================================================
+        // 💰 WRITE LEDGER
         jdbcTemplate.update(
             """
-        INSERT INTO ledger_entries(
-            property_id,
-            entry_type,
-            category,
-            amount,
-            entry_month,
-            entry_year,
-            reference,
-            created_at
-        )
-        VALUES (?, 'DEBIT', 'PAYOUT', ?, ?, ?, ?, ?)
-        """.trimIndent(),
+            INSERT INTO ledger_entries(
+                property_id,
+                entry_type,
+                category,
+                amount,
+                entry_month,
+                entry_year,
+                reference,
+                created_at
+            )
+            VALUES (?, 'DEBIT', 'PAYOUT', ?, ?, ?, ?, ?)
+            """.trimIndent(),
             propertyId,
             amount,
             now.monthValue,
@@ -241,39 +234,33 @@ class PayoutService(
             now
         )
 
-        // =====================================================
-        // ✅ UPDATE PAYOUT (SAFE)
-        // =====================================================
+        // ✅ UPDATE STATUS
         jdbcTemplate.update(
             """
-        UPDATE payout_requests
-        SET status = 'PAID',
-            processed_at = ?,
-            processed_by = ?,
-            national_id = ?
-        WHERE id = ?
-        """.trimIndent(),
+            UPDATE payout_requests
+            SET status = 'PAID',
+                processed_at = ?,
+                processed_by = ?
+            WHERE id = ?
+            """.trimIndent(),
             now,
             adminId,
-            "VERIFIED", // 🔥 NEVER store real ID
             payoutId
         )
 
-        log.info("✅ payout marked as PAID → VERIFIED → id=$payoutId")
+        log.info("✅ payout PAID → id=$payoutId")
     }
 
-
     // =====================================================
-// =====================================================
-// ❌ REJECT PAYOUT (IMPROVED)
-// =====================================================
+    // ❌ REJECT PAYOUT
+    // =====================================================
     @Transactional
     fun rejectPayout(
         payoutId: UUID,
         adminId: UUID
     ) {
 
-        log.info("❌ Reject payout → id=$payoutId admin=$adminId")
+        log.info("❌ Reject payout → id=$payoutId")
 
         val payout = jdbcTemplate.queryForMap(
             "SELECT status FROM payout_requests WHERE id = ? FOR UPDATE",
@@ -281,19 +268,19 @@ class PayoutService(
         )
 
         if (payout["status"] != "PENDING") {
-            throw BadRequestException("Payout already processed")
+            throw BadRequestException("Already processed")
         }
 
         val now = LocalDateTime.now(kenyaZone)
 
         jdbcTemplate.update(
             """
-        UPDATE payout_requests
-        SET status = 'REJECTED',
-            processed_at = ?,
-            processed_by = ?
-        WHERE id = ?
-        """.trimIndent(),
+            UPDATE payout_requests
+            SET status = 'REJECTED',
+                processed_at = ?,
+                processed_by = ?
+            WHERE id = ?
+            """.trimIndent(),
             now,
             adminId,
             payoutId
