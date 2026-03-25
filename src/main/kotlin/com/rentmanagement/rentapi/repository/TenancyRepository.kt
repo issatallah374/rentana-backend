@@ -24,24 +24,54 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
             te.full_name AS tenantName,
             te.phone_number AS tenantPhone,
 
-            COALESCE(tb.balance, 0) AS balance,
+            -- ✅ REAL BALANCE FROM LEDGER (SOURCE OF TRUTH)
+            COALESCE((
+                SELECT SUM(
+                    CASE
+                        WHEN le.entry_type = 'DEBIT' THEN le.amount
+                        WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                    END
+                )
+                FROM ledger_entries le
+                WHERE le.tenancy_id = t.id
+            ), 0) AS balance,
 
+            -- ✅ CORRECT STATUS FROM BALANCE
             CASE
-                WHEN COALESCE(tb.balance, 0) > 0 THEN 'OWING'
-                WHEN COALESCE(tb.balance, 0) < 0 THEN 'PAID_EXTRA'
+                WHEN COALESCE((
+                    SELECT SUM(
+                        CASE
+                            WHEN le.entry_type = 'DEBIT' THEN le.amount
+                            WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                        END
+                    )
+                    FROM ledger_entries le
+                    WHERE le.tenancy_id = t.id
+                ), 0) > 0 THEN 'OWING'
+
+                WHEN COALESCE((
+                    SELECT SUM(
+                        CASE
+                            WHEN le.entry_type = 'DEBIT' THEN le.amount
+                            WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                        END
+                    )
+                    FROM ledger_entries le
+                    WHERE le.tenancy_id = t.id
+                ), 0) < 0 THEN 'PAID_EXTRA'
+
                 ELSE 'CLEARED'
             END AS status
 
         FROM tenancies t
         JOIN units u ON u.id = t.unit_id
         JOIN tenants te ON te.id = t.tenant_id
-        LEFT JOIN tenancy_balances tb ON tb.tenancy_id = t.id
 
         WHERE t.is_active = true
           AND u.property_id = :propertyId
 
         ORDER BY u.unit_number
-    """,
+        """,
         nativeQuery = true
     )
     fun getActiveTenantsByProperty(
@@ -61,25 +91,54 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
             t.start_date AS startDate,
             t.is_active AS active,
 
-            COALESCE(tb.balance, 0) AS balance,
+            -- ✅ REAL BALANCE FROM LEDGER
+            COALESCE((
+                SELECT SUM(
+                    CASE
+                        WHEN le.entry_type = 'DEBIT' THEN le.amount
+                        WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                    END
+                )
+                FROM ledger_entries le
+                WHERE le.tenancy_id = t.id
+            ), 0) AS balance,
 
+            -- ✅ CORRECT STATUS
             CASE
-                WHEN COALESCE(tb.balance, 0) > 0 THEN 'OWING'
-                WHEN COALESCE(tb.balance, 0) < 0 THEN 'PAID_EXTRA'
+                WHEN COALESCE((
+                    SELECT SUM(
+                        CASE
+                            WHEN le.entry_type = 'DEBIT' THEN le.amount
+                            WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                        END
+                    )
+                    FROM ledger_entries le
+                    WHERE le.tenancy_id = t.id
+                ), 0) > 0 THEN 'OWING'
+
+                WHEN COALESCE((
+                    SELECT SUM(
+                        CASE
+                            WHEN le.entry_type = 'DEBIT' THEN le.amount
+                            WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                        END
+                    )
+                    FROM ledger_entries le
+                    WHERE le.tenancy_id = t.id
+                ), 0) < 0 THEN 'PAID_EXTRA'
+
                 ELSE 'CLEARED'
             END AS status
 
         FROM tenancies t
         JOIN tenants te ON te.id = t.tenant_id
         JOIN units u ON u.id = t.unit_id
-        LEFT JOIN tenancy_balances tb ON tb.tenancy_id = t.id
 
         WHERE u.property_id = :propertyId
         ORDER BY t.start_date DESC
-    """,
+        """,
         nativeQuery = true
     )
-
     fun getAllTenantsByProperty(
         @Param("propertyId") propertyId: UUID
     ): List<AllTenantProjection>
@@ -99,6 +158,7 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
             COALESCE(SUM(CASE WHEN l.entry_type='CREDIT' THEN l.amount END),0) as totalPaid,
             COALESCE(SUM(CASE WHEN l.entry_type='DEBIT' THEN l.amount END),0) as totalCharged,
 
+            -- ✅ SAME LOGIC USED EVERYWHERE
             COALESCE(SUM(
                 CASE
                     WHEN l.entry_type='DEBIT' THEN l.amount
