@@ -36,7 +36,7 @@ interface LedgerEntryRepository : JpaRepository<LedgerEntry, UUID> {
     ): List<LedgerEntry>
 
     // =====================================================
-    // 💰 TOTAL COLLECTED (STRICT = ONLY RENT PAYMENTS)
+    // 💰 TOTAL COLLECTED (SAFE NULL HANDLING)
     // =====================================================
     @Query(
         """
@@ -51,6 +51,26 @@ interface LedgerEntryRepository : JpaRepository<LedgerEntry, UUID> {
         @Param("propertyId") propertyId: UUID,
         @Param("creditType") creditType: LedgerEntryType = LedgerEntryType.CREDIT,
         @Param("rentPayment") rentPayment: LedgerCategory = LedgerCategory.RENT_PAYMENT
+    ): BigDecimal
+
+    // =====================================================
+    // 💰 CURRENT WALLET BALANCE (🔥 IMPORTANT ADD)
+    // =====================================================
+    @Query(
+        """
+        SELECT COALESCE(SUM(
+            CASE 
+                WHEN l.entryType = 'CREDIT' AND l.category = 'RENT_PAYMENT' THEN l.amount
+                WHEN l.entryType = 'DEBIT' AND l.category = 'PAYOUT' THEN -l.amount
+                ELSE 0
+            END
+        ), 0)
+        FROM LedgerEntry l
+        WHERE l.property.id = :propertyId
+        """
+    )
+    fun getWalletBalance(
+        @Param("propertyId") propertyId: UUID
     ): BigDecimal
 
     // =====================================================

@@ -4,6 +4,7 @@ import com.rentmanagement.rentapi.dto.RequestPayoutWithPin
 import com.rentmanagement.rentapi.repository.PropertyRepository
 import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.services.PayoutService
+import com.rentmanagement.rentapi.services.WalletService
 import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
 import org.springframework.security.core.Authentication
@@ -16,7 +17,8 @@ import java.util.*
 class PayoutController(
     private val payoutService: PayoutService,
     private val propertyRepository: PropertyRepository,
-    private val walletRepository: WalletRepository
+    private val walletRepository: WalletRepository,
+    private val walletService: WalletService // ✅ ADDED
 ) {
 
     private val log = LoggerFactory.getLogger(PayoutController::class.java)
@@ -43,7 +45,7 @@ class PayoutController(
     }
 
     // =====================================================
-    // 💸 REQUEST PAYOUT (WITH PIN)
+    // 💸 REQUEST PAYOUT (WITH PIN 🔐)
     // =====================================================
     @PostMapping("/request")
     fun requestPayout(
@@ -53,6 +55,7 @@ class PayoutController(
 
         val landlordId = requireUser(auth)
 
+        // ✅ VALIDATE AMOUNT
         if (req.amount <= BigDecimal.ZERO) {
             return ResponseEntity.badRequest().body("Invalid amount")
         }
@@ -61,6 +64,7 @@ class PayoutController(
             return ResponseEntity.badRequest().body("Minimum withdrawal is KES 3")
         }
 
+        // ✅ VALIDATE PROPERTY
         val property = propertyRepository.findById(req.propertyId)
             .orElseThrow { RuntimeException("Property not found") }
 
@@ -68,6 +72,7 @@ class PayoutController(
             throw RuntimeException("Unauthorized")
         }
 
+        // ✅ VALIDATE WALLET
         val wallet = walletRepository.findByPropertyId(req.propertyId)
             ?: throw RuntimeException("Wallet not found")
 
@@ -75,7 +80,14 @@ class PayoutController(
             return ResponseEntity.badRequest().body("Complete payout setup first")
         }
 
-        // 🔐 PIN VALIDATION happens in service
+        // =====================================================
+        // 🔐🔥 CRITICAL FIX — VERIFY PIN HERE
+        // =====================================================
+        walletService.verifyPin(req.propertyId, req.pin)
+
+        // =====================================================
+        // 💸 PROCESS PAYOUT
+        // =====================================================
         payoutService.requestPayout(
             landlordId = landlordId,
             propertyId = req.propertyId,

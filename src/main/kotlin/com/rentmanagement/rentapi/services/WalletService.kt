@@ -7,8 +7,9 @@ import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.wallet.dto.WalletResponse
 import com.rentmanagement.rentapi.dto.SetWalletPinRequest
 import com.rentmanagement.rentapi.wallet.dto.WalletTransactionResponse
-import org.slf4j.LoggerFactory
 import com.rentmanagement.rentapi.dto.ForgotPinRequest
+import com.rentmanagement.rentapi.dto.ResetPinRequest
+import org.slf4j.LoggerFactory
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
@@ -16,7 +17,6 @@ import java.math.RoundingMode
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
-import com.rentmanagement.rentapi.dto.ResetPinRequest
 
 @Service
 class WalletService(
@@ -43,56 +43,30 @@ class WalletService(
 
         return try {
 
-            log.info("💰 Loading wallet → property=$propertyId")
-
             val property = propertyRepository.findById(propertyId)
                 .orElseThrow { RuntimeException("Property not found") }
 
             val wallet = walletRepository.findByPropertyId(propertyId)
                 ?: walletRepository.save(Wallet(property = property))
 
-            val mpesaPhone = wallet.mpesaPhone
-            val accountNumber = wallet.accountNumber
-            val bankName = wallet.bankName
-
-            val payoutSetupComplete =
-                !accountNumber.isNullOrBlank() ||
-                        !mpesaPhone.isNullOrBlank()
-
-            val entries = ledgerEntryRepository.findWalletTransactions(propertyId)
-
-            val rawBalance = entries.fold(BigDecimal.ZERO) { acc, entry ->
-
-                val amount = entry.amount ?: BigDecimal.ZERO
-                val type = entry.entryType?.name
-                val category = entry.category?.name
-
-                when {
-                    type == "CREDIT" && category == "RENT_PAYMENT" -> acc.add(amount)
-                    type == "DEBIT" && category == "PAYOUT" -> acc.subtract(amount)
-                    else -> acc
-                }
-            }
-
-            val safeBalance = rawBalance
+            // ✅ USE DB CALCULATION (FAST + SAFE)
+            val balance = ledgerEntryRepository.getWalletBalance(propertyId)
                 .max(BigDecimal.ZERO)
                 .setScale(2, RoundingMode.HALF_UP)
 
             val totalCollected =
                 ledgerEntryRepository.getTotalCollected(propertyId)
-                    ?.setScale(2, RoundingMode.HALF_UP)
-                    ?: BigDecimal.ZERO
-
-            val pinSet = !wallet.pinHash.isNullOrBlank()
+                    .setScale(2, RoundingMode.HALF_UP)
 
             WalletResponse(
-                balance = safeBalance.toDouble(),
+                balance = balance.toDouble(),
                 totalCollected = totalCollected.toDouble(),
-                payoutSetupComplete = payoutSetupComplete,
-                mpesaPhone = mpesaPhone,
-                accountNumber = accountNumber,
-                bankName = bankName,
-                pinSet = pinSet
+                payoutSetupComplete = !wallet.accountNumber.isNullOrBlank()
+                        || !wallet.mpesaPhone.isNullOrBlank(),
+                mpesaPhone = wallet.mpesaPhone,
+                accountNumber = wallet.accountNumber,
+                bankName = wallet.bankName,
+                pinSet = !wallet.pinHash.isNullOrBlank()
             )
 
         } catch (e: Exception) {
@@ -133,6 +107,25 @@ class WalletService(
     }
 
     // =====================================================
+    // 🔐 VERIFY PIN (🔥 USED IN PAYOUT)
+    // =====================================================
+    fun verifyPin(propertyId: UUID, rawPin: String) {
+
+        val wallet = walletRepository.findByPropertyId(propertyId)
+            ?: throw RuntimeException("Wallet not found")
+
+        if (wallet.pinHash.isNullOrBlank()) {
+            throw RuntimeException("PIN not set")
+        }
+
+        val isValid = passwordEncoder.matches(rawPin, wallet.pinHash)
+
+        if (!isValid) {
+            throw RuntimeException("Invalid PIN")
+        }
+    }
+
+    // =====================================================
     // 📱 REQUEST OTP
     // =====================================================
     fun requestPinResetOtp(request: ForgotPinRequest) {
@@ -148,7 +141,7 @@ class WalletService(
 
         otpStore[wallet.id!!] = otp
 
-        log.info("📱 OTP generated → ${wallet.phoneNumber} → $otp")
+        log.info("📱 OTP generated → ${wallet.phoneNumber}")
 
         smsService.sendSms(
             wallet.phoneNumber!!,
