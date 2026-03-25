@@ -23,7 +23,7 @@ class PayoutService(
     private val kenyaZone = ZoneId.of("Africa/Nairobi")
 
     // =====================================================
-    // 💸 REQUEST PAYOUT (FINAL)
+    // 💸 REQUEST PAYOUT (FINAL + SECURE)
     // =====================================================
     @Transactional
     fun requestPayout(
@@ -36,7 +36,7 @@ class PayoutService(
         log.info("💸 Request payout → landlord=$landlordId property=$propertyId amount=$amount")
 
         // ===============================
-        // ✅ VALIDATION
+        // ✅ BASIC VALIDATION
         // ===============================
         if (amount <= BigDecimal.ZERO) {
             throw BadRequestException("Enter a valid amount")
@@ -60,9 +60,9 @@ class PayoutService(
             throw BadRequestException("Unauthorized property access")
         }
 
-        // ===============================
-        // 🔐 PIN VALIDATION (🔥 FIXED)
-        // ===============================
+        // =====================================================
+        // 🔐 PIN VALIDATION (🔥 MUST COME FIRST)
+        // =====================================================
         val wallet = walletRepository.findByPropertyId(propertyId)
             ?: throw BadRequestException("Wallet not found")
 
@@ -72,42 +72,15 @@ class PayoutService(
 
         val isValidPin = passwordEncoder.matches(pin, wallet.pinHash)
 
+        log.info("🔐 PIN validation → property=$propertyId success=$isValidPin")
+
         if (!isValidPin) {
             throw BadRequestException("Invalid PIN")
         }
 
-        // ===============================
-        // 💰 BALANCE (SAFE - NO FOR UPDATE)
-        // ===============================
-        val balance = jdbcTemplate.queryForObject(
-            """
-            SELECT COALESCE(SUM(
-                CASE
-                    WHEN entry_type = 'CREDIT' THEN amount
-                    WHEN entry_type = 'DEBIT' AND category IN ('PAYOUT') THEN -amount
-                    ELSE 0
-                END
-            ), 0)
-            FROM ledger_entries
-            WHERE property_id = ?
-            """.trimIndent(),
-            BigDecimal::class.java,
-            propertyId
-        ) ?: BigDecimal.ZERO
-
-        log.info("💰 Balance = $balance")
-
-        if (balance <= BigDecimal.ZERO) {
-            throw BadRequestException("No funds available")
-        }
-
-        if (amount > balance) {
-            throw BadRequestException("Insufficient balance")
-        }
-
-        // ===============================
-        // 🚫 PREVENT MULTIPLE REQUESTS
-        // ===============================
+        // =====================================================
+        // 🚫 PREVENT MULTIPLE REQUESTS (AFTER PIN)
+        // =====================================================
         val pending = jdbcTemplate.queryForObject(
             """
             SELECT COUNT(*) 
@@ -122,9 +95,38 @@ class PayoutService(
             throw BadRequestException("You already have a pending payout")
         }
 
-        // ===============================
+        // =====================================================
+        // 💰 BALANCE CALCULATION
+        // =====================================================
+        val balance = jdbcTemplate.queryForObject(
+            """
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN entry_type = 'CREDIT' THEN amount
+                    WHEN entry_type = 'DEBIT' AND category = 'PAYOUT' THEN -amount
+                    ELSE 0
+                END
+            ), 0)
+            FROM ledger_entries
+            WHERE property_id = ?
+            """.trimIndent(),
+            BigDecimal::class.java,
+            propertyId
+        ) ?: BigDecimal.ZERO
+
+        log.info("💰 Balance → $balance")
+
+        if (balance <= BigDecimal.ZERO) {
+            throw BadRequestException("No funds available")
+        }
+
+        if (amount > balance) {
+            throw BadRequestException("Insufficient balance")
+        }
+
+        // =====================================================
         // 💳 PAYOUT METHOD
-        // ===============================
+        // =====================================================
         val payoutDetails = jdbcTemplate.queryForMap(
             "SELECT mpesa_phone, account_number FROM wallets WHERE property_id = ?",
             propertyId
@@ -139,9 +141,9 @@ class PayoutService(
             else -> throw BadRequestException("Complete payout setup first")
         }
 
-        // ===============================
-        // 💾 SAVE REQUEST
-        // ===============================
+        // =====================================================
+        // 💾 SAVE PAYOUT REQUEST
+        // =====================================================
         val now = LocalDateTime.now(kenyaZone)
 
         jdbcTemplate.update(
@@ -211,7 +213,7 @@ class PayoutService(
 
         val now = LocalDateTime.now(kenyaZone)
 
-        // 💰 WRITE LEDGER
+        // 💰 WRITE LEDGER (SOURCE OF TRUTH)
         jdbcTemplate.update(
             """
             INSERT INTO ledger_entries(
@@ -234,7 +236,7 @@ class PayoutService(
             now
         )
 
-        // ✅ UPDATE STATUS
+        // ✅ UPDATE PAYOUT STATUS
         jdbcTemplate.update(
             """
             UPDATE payout_requests
