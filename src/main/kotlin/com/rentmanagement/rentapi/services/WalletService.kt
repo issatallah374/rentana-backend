@@ -25,7 +25,7 @@ class WalletService(
     private val ledgerEntryRepository: LedgerEntryRepository,
     private val walletRepository: WalletRepository,
     private val passwordEncoder: PasswordEncoder,
-    private val smsService: SmsService // ✅ FIXED (was missing)
+    private val smsService: SmsService
 
 ) {
 
@@ -83,13 +83,16 @@ class WalletService(
                     ?.setScale(2, RoundingMode.HALF_UP)
                     ?: BigDecimal.ZERO
 
+            val pinSet = !wallet.pinHash.isNullOrBlank()
+
             WalletResponse(
                 balance = safeBalance.toDouble(),
                 totalCollected = totalCollected.toDouble(),
                 payoutSetupComplete = payoutSetupComplete,
                 mpesaPhone = mpesaPhone,
                 accountNumber = accountNumber,
-                bankName = bankName
+                bankName = bankName,
+                pinSet = pinSet
             )
 
         } catch (e: Exception) {
@@ -102,7 +105,8 @@ class WalletService(
                 payoutSetupComplete = false,
                 mpesaPhone = null,
                 accountNumber = null,
-                bankName = null
+                bankName = null,
+                pinSet = false
             )
         }
     }
@@ -146,7 +150,6 @@ class WalletService(
 
         log.info("📱 OTP generated → ${wallet.phoneNumber} → $otp")
 
-        // ✅ SEND SMS
         smsService.sendSms(
             wallet.phoneNumber!!,
             "Your RentApp PIN reset OTP is $otp"

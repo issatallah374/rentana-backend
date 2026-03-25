@@ -12,5 +12,7 @@ data class WalletResponse(
 
     val accountNumber: String?,
 
-    val bankName: String?
+    val bankName: String?,
+
+    val pinSet: Boolean
 )
