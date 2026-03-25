@@ -17,21 +17,31 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
 
     @Query(
         value = """
-            SELECT 
-                t.id as tenancyId,
-                u.id as unitId,
-                u.unit_number as unitNumber,
-                te.full_name as tenantName,
-                COALESCE(tb.balance, 0) as balance,
-                COALESCE(tb.status, 'CLEARED') as status
-            FROM tenancies t
-            JOIN units u ON u.id = t.unit_id
-            JOIN tenants te ON te.id = t.tenant_id
-            LEFT JOIN tenancy_balances tb ON tb.tenancy_id = t.id
-            WHERE t.is_active = true
-              AND u.property_id = :propertyId
-            ORDER BY u.unit_number
-        """,
+        SELECT 
+            t.id AS tenancyId,
+            u.id AS unitId,
+            u.unit_number AS unitNumber,
+            te.full_name AS tenantName,
+            te.phone_number AS tenantPhone,
+
+            COALESCE(tb.balance, 0) AS balance,
+
+            CASE
+                WHEN COALESCE(tb.balance, 0) > 0 THEN 'OWING'
+                WHEN COALESCE(tb.balance, 0) < 0 THEN 'PAID_EXTRA'
+                ELSE 'CLEARED'
+            END AS status
+
+        FROM tenancies t
+        JOIN units u ON u.id = t.unit_id
+        JOIN tenants te ON te.id = t.tenant_id
+        LEFT JOIN tenancy_balances tb ON tb.tenancy_id = t.id
+
+        WHERE t.is_active = true
+          AND u.property_id = :propertyId
+
+        ORDER BY u.unit_number
+    """,
         nativeQuery = true
     )
     fun getActiveTenantsByProperty(
@@ -44,22 +54,32 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
     @Query(
         value = """
         SELECT
-            t.id as tenancyId,
-            te.full_name as tenantName,
-            te.phone_number as tenantPhone,
-            u.unit_number as unitNumber,
-            t.start_date as startDate,
-            t.is_active as active,
-            COALESCE(tb.balance,0) as balance
+            t.id AS tenancyId,
+            te.full_name AS tenantName,
+            te.phone_number AS tenantPhone,
+            u.unit_number AS unitNumber,
+            t.start_date AS startDate,
+            t.is_active AS active,
+
+            COALESCE(tb.balance, 0) AS balance,
+
+            CASE
+                WHEN COALESCE(tb.balance, 0) > 0 THEN 'OWING'
+                WHEN COALESCE(tb.balance, 0) < 0 THEN 'PAID_EXTRA'
+                ELSE 'CLEARED'
+            END AS status
+
         FROM tenancies t
         JOIN tenants te ON te.id = t.tenant_id
         JOIN units u ON u.id = t.unit_id
         LEFT JOIN tenancy_balances tb ON tb.tenancy_id = t.id
+
         WHERE u.property_id = :propertyId
         ORDER BY t.start_date DESC
-        """,
+    """,
         nativeQuery = true
     )
+
     fun getAllTenantsByProperty(
         @Param("propertyId") propertyId: UUID
     ): List<AllTenantProjection>

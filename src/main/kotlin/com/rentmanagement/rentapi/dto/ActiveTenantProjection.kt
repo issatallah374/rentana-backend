@@ -5,10 +5,15 @@ import java.util.UUID
 
 interface ActiveTenantProjection {
 
-    fun getTenancyId(): UUID
-    fun getUnitId(): UUID
-    fun getUnitNumber(): String
-    fun getTenantName(): String
-    fun getBalance(): BigDecimal
-    fun getStatus(): String?   // ✅ nullable safety improvement
+    val tenancyId: UUID
+    val unitId: UUID
+    val unitNumber: String
+    val tenantName: String
+    val balance: BigDecimal
+
+    // ✅ financial status (OWING, PAID_EXTRA, CLEARED)
+    val status: String?
+
+    // ✅ nullable for safety (can be null in DB)
+    val tenantPhone: String?
 }
