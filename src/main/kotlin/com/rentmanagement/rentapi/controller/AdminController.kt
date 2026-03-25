@@ -60,7 +60,7 @@ class AdminController(
     fun wallet(): String = "admin/dashboard"
 
     // =====================================================
-    // 💸 GET ALL PAYOUTS (🔥 FIXED)
+    // 💸 GET ALL PAYOUTS (🔥 FINAL FIX)
     // =====================================================
     @ResponseBody
     @GetMapping("/api/payouts")
@@ -68,14 +68,20 @@ class AdminController(
 
         requireAdmin(auth)
 
+        log.info("🔥 Loading admin payouts...")
+
         val data = jdbcTemplate.queryForList(
             """
             SELECT 
                 p.id,
                 p.property_id,
-                pr.name AS property_name,
+
+                -- SAFE PROPERTY NAME
+                COALESCE(pr.name, p.property_id::text) AS property_name,
+
                 p.landlord_id,
-                u.email AS landlord_email,
+                COALESCE(u.email, '-') AS landlord_email,
+
                 p.amount,
                 p.method,
                 p.status,
@@ -83,12 +89,10 @@ class AdminController(
                 p.created_at,
                 p.processed_at,
 
-                -- 🔥 WALLET DETAILS
                 w.bank_name,
                 w.account_number,
                 w.mpesa_phone,
 
-                -- 🔥 OPTIONAL: COMPUTED DESTINATION
                 CASE 
                     WHEN p.method = 'BANK' THEN 
                         COALESCE(w.bank_name, '-') || ' (' || COALESCE(w.account_number, '-') || ')'
@@ -97,8 +101,10 @@ class AdminController(
                 END AS destination
 
             FROM payout_requests p
-            JOIN properties pr ON pr.id = p.property_id
-            JOIN users u ON u.id = p.landlord_id
+
+            -- 🔥 FIX: USE LEFT JOINS (NO CRASH)
+            LEFT JOIN properties pr ON pr.id = p.property_id
+            LEFT JOIN users u ON u.id = p.landlord_id
             LEFT JOIN wallets w ON w.property_id = p.property_id
 
             ORDER BY p.created_at DESC
@@ -117,10 +123,15 @@ class AdminController(
 
         requireAdmin(auth)
 
-        val balance = jdbcTemplate.queryForObject(
-            "SELECT COALESCE(balance,0) FROM platform_wallet LIMIT 1",
-            Double::class.java
-        ) ?: 0.0
+        val balance = try {
+            jdbcTemplate.queryForObject(
+                "SELECT COALESCE(balance,0) FROM platform_wallet LIMIT 1",
+                Double::class.java
+            ) ?: 0.0
+        } catch (e: Exception) {
+            log.error("❌ Platform wallet error", e)
+            0.0
+        }
 
         return ResponseEntity.ok(mapOf("balance" to balance))
     }
