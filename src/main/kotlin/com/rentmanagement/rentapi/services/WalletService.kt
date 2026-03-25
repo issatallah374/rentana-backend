@@ -24,7 +24,8 @@ class WalletService(
     private val propertyRepository: PropertyRepository,
     private val ledgerEntryRepository: LedgerEntryRepository,
     private val walletRepository: WalletRepository,
-    private val passwordEncoder: PasswordEncoder
+    private val passwordEncoder: PasswordEncoder,
+    private val smsService: SmsService // ✅ FIXED (was missing)
 
 ) {
 
@@ -36,7 +37,7 @@ class WalletService(
     private val formatter = DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a")
 
     // =====================================================
-    // 💰 GET WALLET (FINAL FIXED VERSION)
+    // 💰 GET WALLET
     // =====================================================
     fun getWallet(propertyId: UUID): WalletResponse {
 
@@ -44,41 +45,22 @@ class WalletService(
 
             log.info("💰 Loading wallet → property=$propertyId")
 
-            // ✅ Validate property
             val property = propertyRepository.findById(propertyId)
                 .orElseThrow { RuntimeException("Property not found") }
 
-            // =====================================================
-            // 🔥 CRITICAL FIX (USE ID NOT ENTITY)
-            // =====================================================
             val wallet = walletRepository.findByPropertyId(propertyId)
-                ?: walletRepository.save(
-                    Wallet(property = property)
-                )
+                ?: walletRepository.save(Wallet(property = property))
 
             val mpesaPhone = wallet.mpesaPhone
             val accountNumber = wallet.accountNumber
             val bankName = wallet.bankName
 
-            log.info("🏦 Wallet → account=$accountNumber mpesa=$mpesaPhone")
-
-            // =====================================================
-            // 🏦 PAYOUT STATUS
-            // =====================================================
             val payoutSetupComplete =
                 !accountNumber.isNullOrBlank() ||
                         !mpesaPhone.isNullOrBlank()
 
-            // =====================================================
-            // 📒 FETCH LEDGER ENTRIES
-            // =====================================================
             val entries = ledgerEntryRepository.findWalletTransactions(propertyId)
 
-            log.info("📒 Ledger entries = ${entries.size}")
-
-            // =====================================================
-            // 💰 BALANCE CALCULATION (STRICT + CORRECT)
-            // =====================================================
             val rawBalance = entries.fold(BigDecimal.ZERO) { acc, entry ->
 
                 val amount = entry.amount ?: BigDecimal.ZERO
@@ -86,15 +68,8 @@ class WalletService(
                 val category = entry.category?.name
 
                 when {
-                    // ✅ REAL MONEY IN
-                    type == "CREDIT" && category == "RENT_PAYMENT" ->
-                        acc.add(amount)
-
-                    // ✅ REAL MONEY OUT
-                    type == "DEBIT" && category == "PAYOUT" ->
-                        acc.subtract(amount)
-
-                    // ❌ IGNORE RENT_CHARGE + noise
+                    type == "CREDIT" && category == "RENT_PAYMENT" -> acc.add(amount)
+                    type == "DEBIT" && category == "PAYOUT" -> acc.subtract(amount)
                     else -> acc
                 }
             }
@@ -103,19 +78,11 @@ class WalletService(
                 .max(BigDecimal.ZERO)
                 .setScale(2, RoundingMode.HALF_UP)
 
-            // =====================================================
-            // 📊 TOTAL COLLECTED
-            // =====================================================
             val totalCollected =
                 ledgerEntryRepository.getTotalCollected(propertyId)
                     ?.setScale(2, RoundingMode.HALF_UP)
                     ?: BigDecimal.ZERO
 
-            log.info("💰 Balance=$safeBalance collected=$totalCollected")
-
-            // =====================================================
-            // ✅ FINAL RESPONSE
-            // =====================================================
             WalletResponse(
                 balance = safeBalance.toDouble(),
                 totalCollected = totalCollected.toDouble(),
@@ -140,6 +107,9 @@ class WalletService(
         }
     }
 
+    // =====================================================
+    // 🔐 SET PIN
+    // =====================================================
     fun setWalletPin(request: SetWalletPinRequest) {
 
         val wallet = walletRepository.findByPropertyId(request.propertyId)
@@ -154,8 +124,13 @@ class WalletService(
         wallet.phoneNumber = request.phoneNumber
 
         walletRepository.save(wallet)
+
+        log.info("🔐 PIN set → property=${request.propertyId}")
     }
 
+    // =====================================================
+    // 📱 REQUEST OTP
+    // =====================================================
     fun requestPinResetOtp(request: ForgotPinRequest) {
 
         val wallet = walletRepository.findByNationalId(request.nationalId)
@@ -171,10 +146,16 @@ class WalletService(
 
         log.info("📱 OTP generated → ${wallet.phoneNumber} → $otp")
 
-        // 🔥 TODO: Replace with real SMS
-        smsService.sendSms(wallet.phoneNumber!!, "Your OTP is $otp")
+        // ✅ SEND SMS
+        smsService.sendSms(
+            wallet.phoneNumber!!,
+            "Your RentApp PIN reset OTP is $otp"
+        )
     }
 
+    // =====================================================
+    // 🔄 RESET PIN
+    // =====================================================
     fun resetPin(request: ResetPinRequest) {
 
         val wallet = walletRepository.findByNationalId(request.nationalId)
@@ -199,16 +180,12 @@ class WalletService(
         log.info("✅ PIN reset successful → wallet=${wallet.id}")
     }
 
-
-
     // =====================================================
     // 📒 GET TRANSACTIONS
     // =====================================================
     fun getTransactions(propertyId: UUID): List<WalletTransactionResponse> {
 
         return try {
-
-            log.info("📒 Loading transactions → property=$propertyId")
 
             ledgerEntryRepository
                 .findWalletTransactions(propertyId)

@@ -2,6 +2,7 @@ package com.rentmanagement.rentapi.models
 
 import jakarta.persistence.*
 import java.math.BigDecimal
+import java.time.LocalDateTime
 import java.util.UUID
 
 @Entity
@@ -40,9 +41,18 @@ class Wallet(
     // =========================
     // 🔐 NEW SECURITY FIELDS
     // =========================
+    @Column(name = "pin_hash")
     var pinHash: String? = null,
 
+    @Column(name = "national_id")
     var nationalId: String? = null,
 
-    var phoneNumber: String? = null
+    @Column(name = "phone_number")
+    var phoneNumber: String? = null,
+
+    @Column(name = "otp_code")
+    var otpCode: String? = null,
+
+    @Column(name = "otp_expiry")
+    var otpExpiry: LocalDateTime? = null
 )

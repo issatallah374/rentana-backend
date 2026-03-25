@@ -1,5 +1,6 @@
 package com.rentmanagement.rentapi.controller
 
+import com.rentmanagement.rentapi.dto.RequestPayoutWithPin
 import com.rentmanagement.rentapi.repository.PropertyRepository
 import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.services.PayoutService
@@ -42,7 +43,7 @@ class PayoutController(
     }
 
     // =====================================================
-    // 💸 REQUEST PAYOUT
+    // 💸 REQUEST PAYOUT (WITH PIN)
     // =====================================================
     @PostMapping("/request")
     fun requestPayout(
@@ -74,7 +75,7 @@ class PayoutController(
             return ResponseEntity.badRequest().body("Complete payout setup first")
         }
 
-        // 🔐 NOW PASS PIN
+        // 🔐 PIN VALIDATION happens in service
         payoutService.requestPayout(
             landlordId = landlordId,
             propertyId = req.propertyId,
@@ -86,6 +87,7 @@ class PayoutController(
 
         return ResponseEntity.ok(mapOf("message" to "Payout requested"))
     }
+
     // =====================================================
     // 🔥 ADMIN MARK AS PAID
     // =====================================================

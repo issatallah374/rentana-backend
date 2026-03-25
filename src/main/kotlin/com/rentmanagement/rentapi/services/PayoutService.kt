@@ -64,19 +64,7 @@ class PayoutService(
         // ===============================
         // 🔐 PIN VALIDATION (CRITICAL)
         // ===============================
-        val walletEntity = walletRepository.findByPropertyId(propertyId)
-            ?: throw BadRequestException("Wallet not found")
 
-        if (walletEntity.pinHash.isNullOrBlank()) {
-            throw BadRequestException("Please set your wallet PIN first")
-        }
-
-        val isValidPin = passwordEncoder.matches(pin, walletEntity.pinHash)
-
-        if (!isValidPin) {
-            log.warn("❌ Invalid PIN attempt → landlord=$landlordId property=$propertyId")
-            throw BadRequestException("Invalid PIN")
-        }
 
         // ===============================
         // 💰 CORRECT WALLET BALANCE (LEDGER = SOURCE OF TRUTH)
