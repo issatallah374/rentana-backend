@@ -8,4 +8,9 @@ interface WalletRepository : JpaRepository<Wallet, UUID> {
 
     // ✅ FIXED (NO ENTITY MATCHING BUGS)
     fun findByPropertyId(propertyId: UUID): Wallet?
+
+
+
+
+    fun findByNationalId(nationalId: String): Wallet?
 }

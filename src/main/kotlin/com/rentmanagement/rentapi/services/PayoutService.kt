@@ -6,13 +6,17 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
+import com.rentmanagement.rentapi.repository.WalletRepository
+import org.springframework.security.crypto.password.PasswordEncoder
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.*
 
 @Service
 class PayoutService(
-    private val jdbcTemplate: JdbcTemplate
+    private val jdbcTemplate: JdbcTemplate,
+    private val walletRepository: WalletRepository,
+    private val passwordEncoder: PasswordEncoder
 ) {
 
     private val log = LoggerFactory.getLogger(PayoutService::class.java)
@@ -20,13 +24,14 @@ class PayoutService(
     private val kenyaZone = ZoneId.of("Africa/Nairobi")
 
     // =====================================================
-    // 💸 REQUEST PAYOUT
-    // =====================================================
+// 💸 REQUEST PAYOUT
+// =====================================================
     @Transactional
     fun requestPayout(
         landlordId: UUID,
         propertyId: UUID,
-        amount: BigDecimal
+        amount: BigDecimal,
+        pin: String
     ) {
 
         log.info("💸 Request payout → landlord=$landlordId property=$propertyId amount=$amount")
@@ -57,32 +62,47 @@ class PayoutService(
         }
 
         // ===============================
-        // 💰 CORRECT WALLET BALANCE (🔥 FIXED FULLY)
+        // 🔐 PIN VALIDATION (CRITICAL)
+        // ===============================
+        val walletEntity = walletRepository.findByPropertyId(propertyId)
+            ?: throw BadRequestException("Wallet not found")
+
+        if (walletEntity.pinHash.isNullOrBlank()) {
+            throw BadRequestException("Please set your wallet PIN first")
+        }
+
+        val isValidPin = passwordEncoder.matches(pin, walletEntity.pinHash)
+
+        if (!isValidPin) {
+            log.warn("❌ Invalid PIN attempt → landlord=$landlordId property=$propertyId")
+            throw BadRequestException("Invalid PIN")
+        }
+
+        // ===============================
+        // 💰 CORRECT WALLET BALANCE (LEDGER = SOURCE OF TRUTH)
         // ===============================
         val balance = jdbcTemplate.queryForObject(
             """
-            SELECT COALESCE(SUM(
-                CASE
-                    WHEN entry_type = 'CREDIT' THEN amount
-                    WHEN entry_type = 'DEBIT' AND category IN ('PAYOUT', 'WITHDRAWAL') THEN -amount
-                    ELSE 0
-                END
-            ), 0)
-            FROM ledger_entries
-            WHERE property_id = ?
-            """.trimIndent(),
+        SELECT COALESCE(SUM(
+            CASE
+                WHEN entry_type = 'CREDIT' THEN amount
+                WHEN entry_type = 'DEBIT' AND category IN ('PAYOUT', 'WITHDRAWAL') THEN -amount
+                ELSE 0
+            END
+        ), 0)
+        FROM ledger_entries
+        WHERE property_id = ?
+        """.trimIndent(),
             BigDecimal::class.java,
             propertyId
         ) ?: BigDecimal.ZERO
 
         log.info("💰 Current balance → $balance")
 
-        // ❌ NO MONEY
         if (balance <= BigDecimal.ZERO) {
             throw BadRequestException("No funds available")
         }
 
-        // ❌ INSUFFICIENT
         if (amount > balance) {
             throw BadRequestException("Insufficient balance")
         }
@@ -96,13 +116,13 @@ class PayoutService(
         // ===============================
         // ✅ GET PAYOUT METHOD
         // ===============================
-        val wallet = jdbcTemplate.queryForMap(
+        val payoutDetails = jdbcTemplate.queryForMap(
             "SELECT mpesa_phone, account_number FROM wallets WHERE property_id = ?",
             propertyId
         )
 
-        val mpesa = wallet["mpesa_phone"]?.toString()
-        val bank = wallet["account_number"]?.toString()
+        val mpesa = payoutDetails["mpesa_phone"]?.toString()
+        val bank = payoutDetails["account_number"]?.toString()
 
         val (method, destination) = when {
             !mpesa.isNullOrBlank() -> "MPESA" to mpesa
@@ -115,10 +135,10 @@ class PayoutService(
         // ===============================
         val pending = jdbcTemplate.queryForObject(
             """
-            SELECT COUNT(*) 
-            FROM payout_requests 
-            WHERE property_id = ? AND status = 'PENDING'
-            """.trimIndent(),
+        SELECT COUNT(*) 
+        FROM payout_requests 
+        WHERE property_id = ? AND status = 'PENDING'
+        """.trimIndent(),
             Int::class.java,
             propertyId
         ) ?: 0
@@ -134,18 +154,18 @@ class PayoutService(
 
         jdbcTemplate.update(
             """
-            INSERT INTO payout_requests (
-                id,
-                landlord_id,
-                property_id,
-                amount,
-                method,
-                destination,
-                status,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
-            """.trimIndent(),
+        INSERT INTO payout_requests (
+            id,
+            landlord_id,
+            property_id,
+            amount,
+            method,
+            destination,
+            status,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
+        """.trimIndent(),
             UUID.randomUUID(),
             landlordId,
             propertyId,

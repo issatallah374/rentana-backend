@@ -5,25 +5,32 @@ import com.rentmanagement.rentapi.repository.PropertyRepository
 import com.rentmanagement.rentapi.repository.LedgerEntryRepository
 import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.wallet.dto.WalletResponse
+import com.rentmanagement.rentapi.dto.SetWalletPinRequest
 import com.rentmanagement.rentapi.wallet.dto.WalletTransactionResponse
 import org.slf4j.LoggerFactory
+import com.rentmanagement.rentapi.dto.ForgotPinRequest
+import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.stereotype.Service
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import com.rentmanagement.rentapi.dto.ResetPinRequest
 
 @Service
 class WalletService(
 
     private val propertyRepository: PropertyRepository,
     private val ledgerEntryRepository: LedgerEntryRepository,
-    private val walletRepository: WalletRepository
+    private val walletRepository: WalletRepository,
+    private val passwordEncoder: PasswordEncoder
 
 ) {
 
     private val log = LoggerFactory.getLogger(WalletService::class.java)
+
+    private val otpStore = mutableMapOf<UUID, String>()
 
     private val kenyaZone = ZoneId.of("Africa/Nairobi")
     private val formatter = DateTimeFormatter.ofPattern("dd MMM yyyy, hh:mm a")
@@ -132,6 +139,67 @@ class WalletService(
             )
         }
     }
+
+    fun setWalletPin(request: SetWalletPinRequest) {
+
+        val wallet = walletRepository.findByPropertyId(request.propertyId)
+            ?: throw RuntimeException("Wallet not found")
+
+        if (request.pin.length < 4) {
+            throw RuntimeException("PIN must be at least 4 digits")
+        }
+
+        wallet.pinHash = passwordEncoder.encode(request.pin)
+        wallet.nationalId = request.nationalId
+        wallet.phoneNumber = request.phoneNumber
+
+        walletRepository.save(wallet)
+    }
+
+    fun requestPinResetOtp(request: ForgotPinRequest) {
+
+        val wallet = walletRepository.findByNationalId(request.nationalId)
+            ?: throw RuntimeException("Invalid National ID")
+
+        if (wallet.phoneNumber.isNullOrBlank()) {
+            throw RuntimeException("No phone linked to wallet")
+        }
+
+        val otp = (100000..999999).random().toString()
+
+        otpStore[wallet.id!!] = otp
+
+        log.info("📱 OTP generated → ${wallet.phoneNumber} → $otp")
+
+        // 🔥 TODO: Replace with real SMS
+        smsService.sendSms(wallet.phoneNumber!!, "Your OTP is $otp")
+    }
+
+    fun resetPin(request: ResetPinRequest) {
+
+        val wallet = walletRepository.findByNationalId(request.nationalId)
+            ?: throw RuntimeException("Invalid National ID")
+
+        val savedOtp = otpStore[wallet.id!!]
+
+        if (savedOtp != request.otp) {
+            throw RuntimeException("Invalid OTP")
+        }
+
+        if (request.newPin.length < 4) {
+            throw RuntimeException("PIN must be at least 4 digits")
+        }
+
+        wallet.pinHash = passwordEncoder.encode(request.newPin)
+
+        walletRepository.save(wallet)
+
+        otpStore.remove(wallet.id!!)
+
+        log.info("✅ PIN reset successful → wallet=${wallet.id}")
+    }
+
+
 
     // =====================================================
     // 📒 GET TRANSACTIONS

@@ -46,46 +46,46 @@ class PayoutController(
     // =====================================================
     @PostMapping("/request")
     fun requestPayout(
-        @RequestParam propertyId: UUID,
-        @RequestParam amount: BigDecimal,
+        @RequestBody req: RequestPayoutWithPin,
         auth: Authentication?
     ): ResponseEntity<Any> {
 
         val landlordId = requireUser(auth)
 
-        if (amount <= BigDecimal.ZERO) {
+        if (req.amount <= BigDecimal.ZERO) {
             return ResponseEntity.badRequest().body("Invalid amount")
         }
 
-        if (amount < BigDecimal("3")) {
+        if (req.amount < BigDecimal("3")) {
             return ResponseEntity.badRequest().body("Minimum withdrawal is KES 3")
         }
 
-        val property = propertyRepository.findById(propertyId)
+        val property = propertyRepository.findById(req.propertyId)
             .orElseThrow { RuntimeException("Property not found") }
 
         if (property.landlord.id != landlordId) {
             throw RuntimeException("Unauthorized")
         }
 
-        val wallet = walletRepository.findByPropertyId(propertyId)
+        val wallet = walletRepository.findByPropertyId(req.propertyId)
             ?: throw RuntimeException("Wallet not found")
 
         if (wallet.accountNumber.isNullOrBlank() && wallet.mpesaPhone.isNullOrBlank()) {
             return ResponseEntity.badRequest().body("Complete payout setup first")
         }
 
+        // 🔐 NOW PASS PIN
         payoutService.requestPayout(
             landlordId = landlordId,
-            propertyId = propertyId,
-            amount = amount
+            propertyId = req.propertyId,
+            amount = req.amount,
+            pin = req.pin
         )
 
-        log.info("💸 Payout requested → landlord=$landlordId property=$propertyId amount=$amount")
+        log.info("💸 Payout requested → landlord=$landlordId property=${req.propertyId} amount=${req.amount}")
 
         return ResponseEntity.ok(mapOf("message" to "Payout requested"))
     }
-
     // =====================================================
     // 🔥 ADMIN MARK AS PAID
     // =====================================================

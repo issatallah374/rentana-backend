@@ -6,6 +6,9 @@ import com.rentmanagement.rentapi.services.WalletService
 import com.rentmanagement.rentapi.repository.PropertyRepository
 import com.rentmanagement.rentapi.repository.WalletRepository
 import com.rentmanagement.rentapi.models.Wallet
+import com.rentmanagement.rentapi.dto.ForgotPinRequest
+import com.rentmanagement.rentapi.dto.ResetPinRequest
+import com.rentmanagement.rentapi.dto.SetWalletPinRequest
 import com.rentmanagement.rentapi.dto.PayoutSetupRequest
 import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
@@ -32,6 +35,25 @@ class WalletController(
     fun getWallet(@PathVariable propertyId: UUID): WalletResponse {
         return walletService.getWallet(propertyId)
     }
+
+    @PostMapping("/set-pin")
+    fun setPin(@RequestBody req: SetWalletPinRequest) {
+        walletService.setWalletPin(req)
+    }
+
+    @PostMapping("/forgot-pin")
+    fun forgotPin(@RequestBody req: ForgotPinRequest): Any {
+        walletService.requestPinResetOtp(req)
+        return mapOf("message" to "OTP sent")
+    }
+
+    @PostMapping("/reset-pin")
+    fun resetPin(@RequestBody req: ResetPinRequest): Any {
+        walletService.resetPin(req)
+        return mapOf("message" to "PIN reset successful")
+    }
+
+
 
     // ================================
     // 📒 TRANSACTIONS

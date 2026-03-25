@@ -31,11 +31,18 @@ class Wallet(
     var adminApprovalEnabled: Boolean = true,
 
     // =========================
-    // 🔥 NEW FIELDS
+    // EXISTING
     // =========================
     var bankName: String? = null,
-
     var accountNumber: String? = null,
+    var mpesaPhone: String? = null,
 
-    var mpesaPhone: String? = null
+    // =========================
+    // 🔐 NEW SECURITY FIELDS
+    // =========================
+    var pinHash: String? = null,
+
+    var nationalId: String? = null,
+
+    var phoneNumber: String? = null
 )
