@@ -41,7 +41,7 @@ class SmsServiceImpl(
                     "from": "$senderId",
                     "sms": "$message",
                     "type": "plain",
-                    "channel": "generic",
+                    "channel": "dnd",
                     "api_key": "$apiKey"
                 }
             """.trimIndent()

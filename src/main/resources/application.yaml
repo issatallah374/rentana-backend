@@ -50,7 +50,7 @@ mpesa:
 # =========================================================
 termii:
   apiKey: ${TERMII_API_KEY}
-  senderId: Termii   # 🔥 IMPORTANT (NOT RentApp until approved)
+  senderId: N-Alert   # 🔥 IMPORTANT (NOT RentApp until approved)
 
 # =========================================================
 # 🔐 OTP CONFIG (PRODUCTION READY)
