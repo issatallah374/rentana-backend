@@ -11,7 +11,7 @@ import java.nio.charset.StandardCharsets
 class SmsServiceImpl(
 
     @Value("\${termii.apiKey:}") private val apiKey: String,
-    @Value("\${termii.senderId:}") private val senderId: String // 🔥 optional
+    @Value("\${termii.senderId:}") private val senderId: String // optional
 
 ) : SmsService {
 
@@ -20,8 +20,14 @@ class SmsServiceImpl(
     override fun sendSms(phone: String, message: String) {
 
         val formatted = formatPhone(phone)
+        val otp = extractOtp(message)
 
         log.info("📤 Sending SMS → $formatted")
+
+        // 🔥 LOG OTP CLEARLY
+        if (otp != null) {
+            log.info("🔐 OTP DETECTED → $otp (to $formatted)")
+        }
 
         // =========================
         // 🔥 DEV MODE
@@ -29,13 +35,17 @@ class SmsServiceImpl(
         if (apiKey.isBlank()) {
             log.warn("⚠️ No TERMII API KEY → DEV MODE")
             log.info("📱 SMS (DEV) → $formatted → $message")
+
+            if (otp != null) {
+                log.info("🔐 OTP (DEV LOG) → $otp")
+            }
+
             return
         }
 
         try {
             val url = URL("https://api.ng.termii.com/api/sms/send")
 
-            // 🔥 BUILD JSON DYNAMICALLY
             val payload = if (senderId.isNotBlank()) {
                 """
                 {
@@ -94,6 +104,10 @@ class SmsServiceImpl(
                 log.error("❌ TERMII REJECTED SMS → $response")
             } else {
                 log.info("✅ SMS SUCCESS → $formatted")
+
+                if (otp != null) {
+                    log.info("🔐 OTP SENT SUCCESSFULLY → $otp")
+                }
             }
 
         } catch (e: Exception) {
@@ -105,6 +119,8 @@ class SmsServiceImpl(
     // 🔁 FALLBACK METHOD
     // =========================
     private fun sendWithoutSender(phone: String, message: String) {
+
+        val otp = extractOtp(message)
 
         try {
             val url = URL("https://api.ng.termii.com/api/sms/send")
@@ -133,9 +149,22 @@ class SmsServiceImpl(
 
             log.info("📱 FALLBACK SMS RESPONSE → $response")
 
+            if (otp != null) {
+                log.info("🔐 OTP (FALLBACK) → $otp")
+            }
+
         } catch (e: Exception) {
             log.error("❌ FALLBACK SMS FAILED → ${e.message}", e)
         }
+    }
+
+    // =========================
+    // 🔐 OTP EXTRACTOR
+    // =========================
+    private fun extractOtp(message: String): String? {
+        // Matches 4–8 digit OTP codes
+        val regex = Regex("\\b\\d{4,8}\\b")
+        return regex.find(message)?.value
     }
 
     // =========================
