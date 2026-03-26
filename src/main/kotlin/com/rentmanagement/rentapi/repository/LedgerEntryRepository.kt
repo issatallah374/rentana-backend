@@ -92,7 +92,7 @@ interface LedgerEntryRepository : JpaRepository<LedgerEntry, UUID> {
         @Param("year") year: Int,
         @Param("month") month: Int,
         @Param("debitType") debitType: LedgerEntryType = LedgerEntryType.DEBIT,
-        @Param("rentCharge") rentCharge: LedgerCategory = LedgerCategory.RENT_CHARGE
+        @Param("rentCharge") rentCharge: LedgerCategory = LedgerCategory.MONTHLY_RENT
     ): BigDecimal
 
     // =====================================================
