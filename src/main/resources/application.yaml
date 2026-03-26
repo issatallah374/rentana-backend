@@ -46,22 +46,23 @@ mpesa:
   baseUrl: https://api.safaricom.co.ke
 
 # =========================================================
-# 📱 TWILIO SMS (🔥 NEW)
+# 📱 SMS (TERMII) ✅ FIXED
 # =========================================================
 termii:
   apiKey: ${TERMII_API_KEY}
-  senderId: RentApp
+  senderId: Termii   # 🔥 IMPORTANT (NOT RentApp until approved)
 
 # =========================================================
-# 🔐 OTP CONFIG (🔥 NEW)
+# 🔐 OTP CONFIG (PRODUCTION READY)
 # =========================================================
 otp:
   expiry-minutes: 5
+
   resend:
-    first: 30      # seconds
-    second: 60
-    third: 90
-    max: 3600      # 1 hour after 3 attempts
+    first: 30        # seconds
+    second: 60       # 1 min
+    third: 90        # 1.5 min
+    max: 3600        # 1 hour block after 3 attempts
 
 # =========================================================
 # 🌐 SERVER

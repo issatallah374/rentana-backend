@@ -11,7 +11,7 @@ import java.nio.charset.StandardCharsets
 class SmsServiceImpl(
 
     @Value("\${termii.apiKey:}") private val apiKey: String,
-    @Value("\${termii.senderId:Termii}") private val senderId: String // 🔥 use Termii default first
+    @Value("\${termii.senderId:Termii}") private val senderId: String
 
 ) : SmsService {
 
@@ -65,6 +65,15 @@ class SmsServiceImpl(
             }
 
             log.info("📱 TERMII RESPONSE → $response")
+
+            // =========================
+            // 🔥 EXTRA VALIDATION
+            // =========================
+            if (response.contains("\"status\":\"error\"")) {
+                log.error("❌ TERMII REJECTED SMS → $response")
+            } else {
+                log.info("✅ SMS SUCCESS → $formatted")
+            }
 
         } catch (e: Exception) {
             log.error("❌ SMS FAILED → ${e.message}", e)
