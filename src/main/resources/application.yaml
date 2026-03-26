@@ -42,12 +42,26 @@ mpesa:
   consumerSecret: ${MPESA_CONSUMER_SECRET}
   shortcode: ${MPESA_SHORTCODE}
   passkey: ${MPESA_PASSKEY}
-
-  # ⚠️ MUST be HTTPS PUBLIC DOMAIN
   callbackUrl: ${MPESA_CALLBACK_URL}
-
-  # 🔥 PRODUCTION URL (NO SANDBOX HERE)
   baseUrl: https://api.safaricom.co.ke
+
+# =========================================================
+# 📱 TWILIO SMS (🔥 NEW)
+# =========================================================
+termii:
+  apiKey: ${TERMII_API_KEY}
+  senderId: RentApp
+
+# =========================================================
+# 🔐 OTP CONFIG (🔥 NEW)
+# =========================================================
+otp:
+  expiry-minutes: 5
+  resend:
+    first: 30      # seconds
+    second: 60
+    third: 90
+    max: 3600      # 1 hour after 3 attempts
 
 # =========================================================
 # 🌐 SERVER

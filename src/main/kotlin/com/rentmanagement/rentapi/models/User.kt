@@ -24,12 +24,16 @@ data class User(
     @Column(nullable = false)
     var email: String,
 
-    // 🔥 IMPORTANT FOR MPESA
+    // 🔥 IMPORTANT FOR LOGIN + MPESA
     @Column(nullable = false)
     var phone: String,
 
     @Column(name = "password_hash", nullable = false)
     var passwordHash: String,
+
+    // 🔐 NEW: USER PIN (HASHED)
+    @Column(name = "pin_hash")
+    var pinHash: String? = null,
 
     @Column(nullable = false)
     var role: String,
@@ -40,12 +44,15 @@ data class User(
     @Column(name = "created_at", nullable = false)
     var createdAt: LocalDateTime = LocalDateTime.now(),
 
-    // 🔐 NEW FIELD (SECURE)
+    // 🔐 ADMIN SECURITY (ALREADY GOOD)
     @Column(name = "national_id_hash")
     var nationalIdHash: String? = null
 
 ) {
 
+    // =========================
+    // 📱 NORMALIZE PHONE
+    // =========================
     @PrePersist
     @PreUpdate
     fun normalizePhone() {
