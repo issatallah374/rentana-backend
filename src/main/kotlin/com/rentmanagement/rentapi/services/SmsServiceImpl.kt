@@ -10,7 +10,8 @@ import java.nio.charset.StandardCharsets
 @Service
 class SmsServiceImpl(
 
-    @Value("\${termii.apiKey:}") private val apiKey: String
+    @Value("\${termii.apiKey:}") private val apiKey: String,
+    @Value("\${termii.senderId:}") private val senderId: String // 🔥 optional
 
 ) : SmsService {
 
@@ -34,7 +35,20 @@ class SmsServiceImpl(
         try {
             val url = URL("https://api.ng.termii.com/api/sms/send")
 
-            val payload = """
+            // 🔥 BUILD JSON DYNAMICALLY
+            val payload = if (senderId.isNotBlank()) {
+                """
+                {
+                    "to": "$formatted",
+                    "from": "$senderId",
+                    "sms": "$message",
+                    "type": "plain",
+                    "channel": "generic",
+                    "api_key": "$apiKey"
+                }
+                """.trimIndent()
+            } else {
+                """
                 {
                     "to": "$formatted",
                     "sms": "$message",
@@ -42,7 +56,8 @@ class SmsServiceImpl(
                     "channel": "generic",
                     "api_key": "$apiKey"
                 }
-            """.trimIndent()
+                """.trimIndent()
+            }
 
             val conn = url.openConnection() as HttpURLConnection
 
@@ -64,6 +79,17 @@ class SmsServiceImpl(
 
             log.info("📱 TERMII RESPONSE → $response")
 
+            // =========================
+            // 🔥 AUTO FALLBACK IF SENDER FAILS
+            // =========================
+            if (response.contains("ApplicationSenderId not found") && senderId.isNotBlank()) {
+
+                log.warn("⚠️ SenderId failed → retrying WITHOUT senderId")
+
+                sendWithoutSender(formatted, message)
+                return
+            }
+
             if (response.contains("\"status\":\"error\"")) {
                 log.error("❌ TERMII REJECTED SMS → $response")
             } else {
@@ -72,6 +98,43 @@ class SmsServiceImpl(
 
         } catch (e: Exception) {
             log.error("❌ SMS FAILED → ${e.message}", e)
+        }
+    }
+
+    // =========================
+    // 🔁 FALLBACK METHOD
+    // =========================
+    private fun sendWithoutSender(phone: String, message: String) {
+
+        try {
+            val url = URL("https://api.ng.termii.com/api/sms/send")
+
+            val payload = """
+                {
+                    "to": "$phone",
+                    "sms": "$message",
+                    "type": "plain",
+                    "channel": "generic",
+                    "api_key": "$apiKey"
+                }
+            """.trimIndent()
+
+            val conn = url.openConnection() as HttpURLConnection
+
+            conn.requestMethod = "POST"
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.doOutput = true
+
+            conn.outputStream.use {
+                it.write(payload.toByteArray(StandardCharsets.UTF_8))
+            }
+
+            val response = conn.inputStream.bufferedReader().readText()
+
+            log.info("📱 FALLBACK SMS RESPONSE → $response")
+
+        } catch (e: Exception) {
+            log.error("❌ FALLBACK SMS FAILED → ${e.message}", e)
         }
     }
 
