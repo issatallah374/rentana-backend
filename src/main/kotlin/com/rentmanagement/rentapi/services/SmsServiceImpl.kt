@@ -11,7 +11,7 @@ import java.nio.charset.StandardCharsets
 class SmsServiceImpl(
 
     @Value("\${termii.apiKey:}") private val apiKey: String,
-    @Value("\${termii.senderId:RentApp}") private val senderId: String
+    @Value("\${termii.senderId:Termii}") private val senderId: String // 🔥 use Termii default first
 
 ) : SmsService {
 
@@ -21,9 +21,14 @@ class SmsServiceImpl(
 
         val formatted = formatPhone(phone)
 
-        // 🔥 IF NO API KEY → DEV MODE
+        log.info("📤 Sending SMS → $formatted")
+
+        // =========================
+        // 🔥 DEV MODE (NO API KEY)
+        // =========================
         if (apiKey.isBlank()) {
-            log.info("📱 SMS (DEV MODE) → $formatted → $message")
+            log.warn("⚠️ No TERMII API KEY → DEV MODE")
+            log.info("📱 SMS (DEV) → $formatted → $message")
             return
         }
 
@@ -45,18 +50,24 @@ class SmsServiceImpl(
 
             conn.requestMethod = "POST"
             conn.setRequestProperty("Content-Type", "application/json")
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
             conn.doOutput = true
 
             conn.outputStream.use {
                 it.write(payload.toByteArray(StandardCharsets.UTF_8))
             }
 
-            val response = conn.inputStream.bufferedReader().readText()
+            val response = try {
+                conn.inputStream.bufferedReader().readText()
+            } catch (e: Exception) {
+                conn.errorStream?.bufferedReader()?.readText() ?: "No error response"
+            }
 
-            log.info("📱 TERMII SMS SENT → $formatted → $response")
+            log.info("📱 TERMII RESPONSE → $response")
 
         } catch (e: Exception) {
-            log.error("❌ TERMII SMS FAILED → ${e.message}")
+            log.error("❌ SMS FAILED → ${e.message}", e)
         }
     }
 
