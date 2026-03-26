@@ -68,6 +68,7 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
         JOIN tenants te ON te.id = t.tenant_id
 
         WHERE t.is_active = true
+          AND t.start_date <= CURRENT_DATE   -- ✅ FIX ADDED HERE
           AND u.property_id = :propertyId
 
         ORDER BY u.unit_number

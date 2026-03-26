@@ -36,6 +36,9 @@ class TenancyService(
             throw RuntimeException("Unit already occupied")
         }
 
+        // 🔥 IMPORTANT:
+        // We ALWAYS set isActive = true
+        // DB will decide when rent starts using start_date
         val tenancy = Tenancy(
             tenant = tenant,
             unit = unit,
@@ -101,7 +104,8 @@ class TenancyService(
         tenantRepository.save(tenant)
     }
 
-    //--------------FinancialTenant
+    // ---------------- TENANT FINANCIAL DETAILS ----------------
+
     fun getTenantFinancialDetails(tenancyId: String): Map<String, Any> {
 
         val result = tenancyRepository.getTenantFinancialDetails(
@@ -128,7 +132,6 @@ class TenancyService(
             "status" to status
         )
     }
-
 
     // ---------------- DELETE TENANCY (ARCHIVE) ----------------
 
