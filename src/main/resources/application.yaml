@@ -8,9 +8,9 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      maximum-pool-size: 5
-      minimum-idle: 1
-      idle-timeout: 10000
+      maximum-pool-size: 15       # 🔥 increased for production
+      minimum-idle: 3
+      idle-timeout: 30000
       connection-timeout: 20000
 
   jpa:
@@ -23,7 +23,8 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
-    validate-on-migrate: false
+    baseline-version: 1          # 🔥 prevents "table already exists"
+    validate-on-migrate: false   # can switch to true later
 
   sql:
     init:
@@ -31,8 +32,8 @@ spring:
 
   security:
     user:
-      name: ${ADMIN_USERNAME:admin}
-      password: ${ADMIN_PASSWORD:admin123}
+      name: ${ADMIN_USERNAME}     # 🔥 removed insecure defaults
+      password: ${ADMIN_PASSWORD}
 
 # =========================================================
 # 💳 MPESA (PRODUCTION)
@@ -46,11 +47,11 @@ mpesa:
   baseUrl: https://api.safaricom.co.ke
 
 # =========================================================
-# 📱 SMS (TERMII) ✅ FIXED
+# 📱 SMS (TERMII)
 # =========================================================
 termii:
   apiKey: ${TERMII_API_KEY}
-  senderId: Rentana   # 🔥 IMPORTANT (NOT RentApp until approved)
+  senderId: Rentana   # must be approved or fallback will trigger
 
 # =========================================================
 # 🔐 OTP CONFIG (PRODUCTION READY)
@@ -59,10 +60,10 @@ otp:
   expiry-minutes: 5
 
   resend:
-    first: 30        # seconds
-    second: 60       # 1 min
-    third: 90        # 1.5 min
-    max: 3600        # 1 hour block after 3 attempts
+    first: 30
+    second: 60
+    third: 90
+    max: 3600
 
 # =========================================================
 # 🌐 SERVER
@@ -76,7 +77,7 @@ server:
 # =========================================================
 logging:
   level:
-    root: WARN
+    root: INFO                     # 🔥 better visibility in prod
     org.springframework: WARN
     org.hibernate: WARN
-    com.rentmanagement.rentapi.services: INFO
+    com.rentmanagement.rentapi: INFO
