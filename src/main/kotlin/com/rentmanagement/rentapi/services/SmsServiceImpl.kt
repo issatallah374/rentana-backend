@@ -10,8 +10,7 @@ import java.nio.charset.StandardCharsets
 @Service
 class SmsServiceImpl(
 
-    @Value("\${termii.apiKey:}") private val apiKey: String,
-    @Value("\${termii.senderId:Termii}") private val senderId: String
+    @Value("\${termii.apiKey:}") private val apiKey: String
 
 ) : SmsService {
 
@@ -24,7 +23,7 @@ class SmsServiceImpl(
         log.info("📤 Sending SMS → $formatted")
 
         // =========================
-        // 🔥 DEV MODE (NO API KEY)
+        // 🔥 DEV MODE
         // =========================
         if (apiKey.isBlank()) {
             log.warn("⚠️ No TERMII API KEY → DEV MODE")
@@ -38,10 +37,9 @@ class SmsServiceImpl(
             val payload = """
                 {
                     "to": "$formatted",
-                    "from": "$senderId",
                     "sms": "$message",
                     "type": "plain",
-                    "channel": "dnd",
+                    "channel": "generic",
                     "api_key": "$apiKey"
                 }
             """.trimIndent()
@@ -66,9 +64,6 @@ class SmsServiceImpl(
 
             log.info("📱 TERMII RESPONSE → $response")
 
-            // =========================
-            // 🔥 EXTRA VALIDATION
-            // =========================
             if (response.contains("\"status\":\"error\"")) {
                 log.error("❌ TERMII REJECTED SMS → $response")
             } else {
