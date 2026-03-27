@@ -64,7 +64,11 @@ class AuthController(
             savedUser.role
         )
 
-        return AuthResponse(token)
+        // ✅ RETURN PHONE
+        return AuthResponse(
+            token = token,
+            phone = savedUser.phone
+        )
     }
 
     // =========================
@@ -92,7 +96,11 @@ class AuthController(
             user.role
         )
 
-        return AuthResponse(token)
+        // ✅ RETURN PHONE
+        return AuthResponse(
+            token = token,
+            phone = user.phone
+        )
     }
 
     // =====================================================
@@ -126,7 +134,11 @@ class AuthController(
             user.role
         )
 
-        return AuthResponse(token)
+        // ✅ RETURN PHONE
+        return AuthResponse(
+            token = token,
+            phone = user.phone
+        )
     }
 
     // =====================================================
