@@ -10,6 +10,8 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.server.ResponseStatusException
 import org.springframework.security.crypto.password.PasswordEncoder
+import java.util.UUID
+import org.springframework.security.core.context.SecurityContextHolder
 
 @RestController
 @RequestMapping("/api/auth")
@@ -101,6 +103,27 @@ class AuthController(
             token = token,
             phone = user.phone
         )
+    }
+
+    // =====================================================
+// 🔍 CHECK IF USER HAS PIN
+// =====================================================
+    @GetMapping("/has-pin")
+    fun hasPin(): ResponseEntity<Map<String, Boolean>> {
+
+        val auth = SecurityContextHolder.getContext().authentication
+            ?: throw ResponseStatusException(HttpStatus.UNAUTHORIZED, "Unauthorized")
+
+        val userId = auth.principal.toString()
+
+        val user = userRepository.findById(UUID.fromString(userId))
+            .orElseThrow {
+                ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found")
+            }
+
+        val hasPin = !user.pinHash.isNullOrBlank()
+
+        return ResponseEntity.ok(mapOf("hasPin" to hasPin))
     }
 
     // =====================================================

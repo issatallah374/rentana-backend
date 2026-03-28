@@ -18,8 +18,11 @@ class JwtAuthFilter(
     override fun shouldNotFilter(request: HttpServletRequest): Boolean {
         val path = request.servletPath
 
-        return path.startsWith("/api/auth") ||
-                path.startsWith("/error")
+        return path == "/api/auth/login" ||
+                path == "/api/auth/register" ||
+                path == "/api/auth/pin-login" ||
+                path == "/api/auth/send-otp" ||
+                path == "/api/auth/verify-otp"
     }
 
     override fun doFilterInternal(
