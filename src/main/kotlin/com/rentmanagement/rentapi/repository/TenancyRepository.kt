@@ -13,7 +13,9 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
 
     fun findByUnitIdAndIsActiveTrue(unitId: UUID): Tenancy?
 
-    // ---------------- ACTIVE TENANTS ----------------
+    // =====================================================
+    // 🟢 ACTIVE TENANTS (ONLY STARTED TENANCIES)
+    // =====================================================
 
     @Query(
         value = """
@@ -36,7 +38,7 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
                 WHERE le.tenancy_id = t.id
             ), 0) AS balance,
 
-            -- ✅ CORRECT STATUS FROM BALANCE
+            -- ✅ STATUS FROM BALANCE
             CASE
                 WHEN COALESCE((
                     SELECT SUM(
@@ -68,7 +70,7 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
         JOIN tenants te ON te.id = t.tenant_id
 
         WHERE t.is_active = true
-          AND t.start_date <= CURRENT_DATE   -- ✅ FIX ADDED HERE
+          AND t.start_date <= CURRENT_DATE   -- 🔥 CRITICAL FIX
           AND u.property_id = :propertyId
 
         ORDER BY u.unit_number
@@ -79,8 +81,9 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
         @Param("propertyId") propertyId: UUID
     ): List<ActiveTenantProjection>
 
-
-    // ---------------- ALL TENANTS ----------------
+    // =====================================================
+    // 📋 ALL TENANTS (INCLUDING FUTURE + INACTIVE)
+    // =====================================================
 
     @Query(
         value = """
@@ -92,7 +95,7 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
             t.start_date AS startDate,
             t.is_active AS active,
 
-            -- ✅ REAL BALANCE FROM LEDGER
+            -- ✅ REAL BALANCE
             COALESCE((
                 SELECT SUM(
                     CASE
@@ -104,7 +107,7 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
                 WHERE le.tenancy_id = t.id
             ), 0) AS balance,
 
-            -- ✅ CORRECT STATUS
+            -- ✅ STATUS
             CASE
                 WHEN COALESCE((
                     SELECT SUM(
@@ -144,8 +147,9 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
         @Param("propertyId") propertyId: UUID
     ): List<AllTenantProjection>
 
-
-    // ---------------- TENANT FINANCIAL DETAILS ----------------
+    // =====================================================
+    // 💰 TENANT FINANCIAL DETAILS
+    // =====================================================
 
     @Query(
         value = """
@@ -159,7 +163,7 @@ interface TenancyRepository : JpaRepository<Tenancy, UUID> {
             COALESCE(SUM(CASE WHEN l.entry_type='CREDIT' THEN l.amount END),0) as totalPaid,
             COALESCE(SUM(CASE WHEN l.entry_type='DEBIT' THEN l.amount END),0) as totalCharged,
 
-            -- ✅ SAME LOGIC USED EVERYWHERE
+            -- ✅ SINGLE SOURCE BALANCE
             COALESCE(SUM(
                 CASE
                     WHEN l.entry_type='DEBIT' THEN l.amount
