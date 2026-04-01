@@ -1,151 +1,192 @@
-package com.rentmanagement.rentapi.services
+package com.rentmanagement.rentapi.repository
 
-import com.rentmanagement.rentapi.dto.TenancyRequest
+import com.rentmanagement.rentapi.models.Tenancy
 import com.rentmanagement.rentapi.dto.ActiveTenantProjection
 import com.rentmanagement.rentapi.dto.AllTenantProjection
-import com.rentmanagement.rentapi.models.Tenancy
-import com.rentmanagement.rentapi.repository.TenancyRepository
-import com.rentmanagement.rentapi.repository.TenantRepository
-import com.rentmanagement.rentapi.repository.UnitRepository
-import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
+import com.rentmanagement.rentapi.dto.TenantFinancialProjection
+import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import java.util.UUID
 
-@Service
-class TenancyService(
-    private val tenancyRepository: TenancyRepository,
-    private val tenantRepository: TenantRepository,
-    private val unitRepository: UnitRepository
-) {
+interface TenancyRepository : JpaRepository<Tenancy, UUID> {
 
-    // ---------------- CREATE TENANCY ----------------
+    fun findByUnitIdAndIsActiveTrue(unitId: UUID): Tenancy?
 
-    @Transactional
-    fun create(request: TenancyRequest): Tenancy {
+    // ---------------- ACTIVE TENANTS ----------------
 
-        val tenant = tenantRepository.findById(request.tenantId)
-            .orElseThrow { RuntimeException("Tenant not found") }
+    @Query(
+        value = """
+        SELECT 
+            t.id AS tenancyId,
+            u.id AS unitId,
+            u.unit_number AS unitNumber,
+            te.full_name AS tenantName,
+            te.phone_number AS tenantPhone,
 
-        val unit = unitRepository.findById(request.unitId)
-            .orElseThrow { RuntimeException("Unit not found") }
+            COALESCE((
+                SELECT SUM(
+                    CASE
+                        WHEN le.entry_type = 'DEBIT' THEN le.amount
+                        WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                    END
+                )
+                FROM ledger_entries le
+                WHERE le.tenancy_id = t.id
+            ), 0) AS balance,
 
-        val existingTenancy =
-            tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
+            CASE
+                WHEN COALESCE((
+                    SELECT SUM(
+                        CASE
+                            WHEN le.entry_type = 'DEBIT' THEN le.amount
+                            WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                        END
+                    )
+                    FROM ledger_entries le
+                    WHERE le.tenancy_id = t.id
+                ), 0) > 0 THEN 'OWING'
 
-        if (existingTenancy != null) {
-            throw RuntimeException("Unit already occupied")
-        }
+                WHEN COALESCE((
+                    SELECT SUM(
+                        CASE
+                            WHEN le.entry_type = 'DEBIT' THEN le.amount
+                            WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                        END
+                    )
+                    FROM ledger_entries le
+                    WHERE le.tenancy_id = t.id
+                ), 0) < 0 THEN 'PAID_EXTRA'
 
-        // 🔥 IMPORTANT:
-        // We ALWAYS set isActive = true
-        // DB will decide when rent starts using start_date
-        val tenancy = Tenancy(
-            tenant = tenant,
-            unit = unit,
-            rentAmount = request.rentAmount,
-            startDate = request.startDate,
-            isActive = true
-        )
+                ELSE 'CLEARED'
+            END AS status
 
-        return tenancyRepository.save(tenancy)
-    }
+        FROM tenancies t
+        JOIN units u ON u.id = t.unit_id
+        JOIN tenants te ON te.id = t.tenant_id
 
-    // ---------------- GET ACTIVE TENANTS ----------------
+        WHERE t.is_active = true
+          AND t.start_date <= CURRENT_DATE
+          AND u.property_id = :propertyId
 
+        ORDER BY u.unit_number
+        """,
+        nativeQuery = true
+    )
     fun getActiveTenantsByProperty(
-        propertyId: String
-    ): List<ActiveTenantProjection> {
+        @Param("propertyId") propertyId: UUID
+    ): List<ActiveTenantProjection>
 
-        return tenancyRepository.getActiveTenantsByProperty(
-            UUID.fromString(propertyId)
-        )
-    }
 
-    // ---------------- GET ALL TENANTS ----------------
+    // ---------------- ALL TENANTS ----------------
 
+    @Query(
+        value = """
+        SELECT
+            t.id AS tenancyId,
+            te.full_name AS tenantName,
+            te.phone_number AS tenantPhone,
+            u.unit_number AS unitNumber,
+            t.start_date AS startDate,
+            t.is_active AS active,
+
+            COALESCE((
+                SELECT SUM(
+                    CASE
+                        WHEN le.entry_type = 'DEBIT' THEN le.amount
+                        WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                    END
+                )
+                FROM ledger_entries le
+                WHERE le.tenancy_id = t.id
+            ), 0) AS balance,
+
+            CASE
+                WHEN COALESCE((
+                    SELECT SUM(
+                        CASE
+                            WHEN le.entry_type = 'DEBIT' THEN le.amount
+                            WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                        END
+                    )
+                    FROM ledger_entries le
+                    WHERE le.tenancy_id = t.id
+                ), 0) > 0 THEN 'OWING'
+
+                WHEN COALESCE((
+                    SELECT SUM(
+                        CASE
+                            WHEN le.entry_type = 'DEBIT' THEN le.amount
+                            WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                        END
+                    )
+                    FROM ledger_entries le
+                    WHERE le.tenancy_id = t.id
+                ), 0) < 0 THEN 'PAID_EXTRA'
+
+                ELSE 'CLEARED'
+            END AS status
+
+        FROM tenancies t
+        JOIN tenants te ON te.id = t.tenant_id
+        JOIN units u ON u.id = t.unit_id
+
+        WHERE u.property_id = :propertyId
+        ORDER BY t.start_date DESC
+        """,
+        nativeQuery = true
+    )
     fun getAllTenantsByProperty(
-        propertyId: String
-    ): List<AllTenantProjection> {
+        @Param("propertyId") propertyId: UUID
+    ): List<AllTenantProjection>
 
-        return tenancyRepository.getAllTenantsByProperty(
-            UUID.fromString(propertyId)
-        )
-    }
 
-    // ---------------- DEACTIVATE TENANCY ----------------
+    // ---------------- TENANT FINANCIAL DETAILS (🔥 FIXED) ----------------
 
-    @Transactional
-    fun deactivateTenancy(tenancyId: String) {
+    @Query(
+        value = """
+        SELECT
+            t.id as tenancyId,
+            te.full_name as tenantName,
+            u.unit_number as unitNumber,
+            t.rent_amount as rentAmount,
+            t.start_date as startDate,
 
-        val tenancy = tenancyRepository.findById(UUID.fromString(tenancyId))
-            .orElseThrow { RuntimeException("Tenancy not found") }
+            -- ✅ FIX: NO JOIN (prevents duplication)
+            COALESCE((
+                SELECT SUM(l.amount)
+                FROM ledger_entries l
+                WHERE l.tenancy_id = t.id
+                AND l.entry_type = 'CREDIT'
+            ), 0) as totalPaid,
 
-        tenancy.isActive = false
-        tenancyRepository.save(tenancy)
+            COALESCE((
+                SELECT SUM(l.amount)
+                FROM ledger_entries l
+                WHERE l.tenancy_id = t.id
+                AND l.entry_type = 'DEBIT'
+            ), 0) as totalCharged,
 
-        val tenant = tenancy.tenant
-        tenant.isActive = false
-        tenantRepository.save(tenant)
-    }
+            COALESCE((
+                SELECT SUM(
+                    CASE
+                        WHEN l.entry_type = 'DEBIT' THEN l.amount
+                        WHEN l.entry_type = 'CREDIT' THEN -l.amount
+                    END
+                )
+                FROM ledger_entries l
+                WHERE l.tenancy_id = t.id
+            ), 0) as balance
 
-    // ---------------- ACTIVATE TENANCY ----------------
+        FROM tenancies t
+        JOIN tenants te ON te.id = t.tenant_id
+        JOIN units u ON u.id = t.unit_id
 
-    @Transactional
-    fun activateTenancy(tenancyId: String) {
-
-        val tenancy = tenancyRepository.findById(UUID.fromString(tenancyId))
-            .orElseThrow { RuntimeException("Tenancy not found") }
-
-        tenancy.isActive = true
-        tenancyRepository.save(tenancy)
-
-        val tenant = tenancy.tenant
-        tenant.isActive = true
-        tenantRepository.save(tenant)
-    }
-
-    // ---------------- TENANT FINANCIAL DETAILS ----------------
-
-    fun getTenantFinancialDetails(tenancyId: String): Map<String, Any> {
-
-        val result = tenancyRepository.getTenantFinancialDetails(
-            UUID.fromString(tenancyId)
-        )
-
-        val balance = result.balance
-
-        val status =
-            when {
-                balance > 0 -> "OWING"
-                balance < 0 -> "PAID_EXTRA"
-                else -> "CLEARED"
-            }
-
-        return mapOf(
-            "tenantName" to result.tenantName,
-            "unitNumber" to result.unitNumber,
-            "rentAmount" to result.rentAmount,
-            "startDate" to result.startDate,
-            "totalPaid" to result.totalPaid,
-            "totalCharged" to result.totalCharged,
-            "balance" to kotlin.math.abs(balance),
-            "status" to status
-        )
-    }
-
-    // ---------------- DELETE TENANCY (ARCHIVE) ----------------
-
-    @Transactional
-    fun deleteTenancy(tenancyId: String) {
-
-        val tenancy = tenancyRepository.findById(UUID.fromString(tenancyId))
-            .orElseThrow { RuntimeException("Tenancy not found") }
-
-        tenancy.isActive = false
-        tenancyRepository.save(tenancy)
-
-        val tenant = tenancy.tenant
-        tenant.isActive = false
-        tenantRepository.save(tenant)
-    }
+        WHERE t.id = :tenancyId
+        """,
+        nativeQuery = true
+    )
+    fun getTenantFinancialDetails(
+        @Param("tenancyId") tenancyId: UUID
+    ): TenantFinancialProjection
 }
