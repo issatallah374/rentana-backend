@@ -6,6 +6,7 @@ import com.rentmanagement.rentapi.repository.LedgerEntryRepository
 import com.rentmanagement.rentapi.repository.PropertyRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
@@ -17,53 +18,116 @@ class DashboardSnapshotService(
     private val snapshotRepository: DashboardSnapshotRepository
 ) {
 
-    private val log = LoggerFactory.getLogger(DashboardSnapshotService::class.java)
+    private val log =
+        LoggerFactory.getLogger(
+            DashboardSnapshotService::class.java
+        )
+
+    // =====================================================
+    // 📊 CREATE MONTHLY SNAPSHOTS
+    // =====================================================
 
     fun createMonthlySnapshots() {
 
         val now = LocalDate.now()
+
         val year = now.year
         val month = now.monthValue
 
-        log.info("📊 Creating dashboard snapshots → $month/$year")
+        log.info(
+            "📊 Creating dashboard snapshots → $month/$year"
+        )
 
-        val properties = propertyRepository.findAll()
+        val properties =
+            propertyRepository.findAll()
 
         properties.forEach { property ->
 
-            val propertyId: UUID = property.id!!
+            val propertyId: UUID =
+                property.id!!
 
-            // ✅ Skip if already exists
-            val exists = snapshotRepository
-                .findByPropertyIdAndYearAndMonth(propertyId, year, month)
+            // =====================================================
+            // ✅ SKIP IF ALREADY EXISTS
+            // =====================================================
+
+            val exists =
+                snapshotRepository
+                    .findByPropertyIdAndYearAndMonth(
+                        propertyId,
+                        year,
+                        month
+                    )
 
             if (exists != null) {
-                log.debug("⏭️ Snapshot exists → property=$propertyId")
+
+                log.debug(
+                    "⏭️ Snapshot already exists → property=$propertyId"
+                )
+
                 return@forEach
             }
 
-            // ✅ Calculate values from ledger
-            val expected = ledgerRepository
-                .sumRentChargesForMonth(propertyId, year, month)
+            // =====================================================
+            // 💰 EXPECTED RENT
+            // =====================================================
 
-            val collected = ledgerRepository
-                .sumPaymentsForMonth(propertyId, year, month)
+            val expected =
+                ledgerRepository
+                    .sumRentChargesForMonth(
+                        propertyId,
+                        year,
+                        month
+                    ) ?: BigDecimal.ZERO
 
-            val arrears = expected.subtract(collected)
+            // =====================================================
+            // 💵 COLLECTED RENT
+            // =====================================================
 
-            val snapshot = DashboardSnapshot(
-                propertyId = propertyId,
-                year = year,
-                month = month,
-                rentExpected = expected,
-                rentCollected = collected,
-                arrears = arrears,
-                createdAt = LocalDateTime.now()
-            )
+            val collected =
+                ledgerRepository
+                    .sumPaymentsForMonth(
+                        propertyId,
+                        year,
+                        month
+                    ) ?: BigDecimal.ZERO
+
+            // =====================================================
+            // ⚠️ ARREARS
+            // =====================================================
+
+            val arrears =
+                expected.subtract(collected)
+
+            // =====================================================
+            // 💾 CREATE SNAPSHOT
+            // =====================================================
+
+            val snapshot =
+                DashboardSnapshot(
+                    propertyId = propertyId,
+                    year = year,
+                    month = month,
+                    rentExpected = expected,
+                    rentCollected = collected,
+                    arrears = arrears,
+                    createdAt = LocalDateTime.now()
+                )
 
             snapshotRepository.save(snapshot)
 
-            log.info("✅ Snapshot saved → property=$propertyId")
+            log.info(
+                """
+                ✅ Snapshot saved
+                → property=$propertyId
+                → expected=$expected
+                → collected=$collected
+                → arrears=$arrears
+                """.trimIndent()
+            )
         }
+
+        log.info(
+            "✅ Monthly snapshot creation complete"
+        )
     }
 }
