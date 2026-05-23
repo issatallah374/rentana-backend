@@ -24,11 +24,15 @@ class ReportService(
             SELECT
                 t.id AS tenancy_id,
 
-                COALESCE(te.full_name, 'Unknown Tenant')
-                    AS tenant_name,
+                COALESCE(
+                    te.full_name,
+                    'Unknown Tenant'
+                ) AS tenant_name,
 
-                COALESCE(u.name, 'Unknown Unit')
-                    AS unit_name,
+                COALESCE(
+                    u.unit_number,
+                    'Unknown Unit'
+                ) AS unit_name,
 
                 p.id AS property_id,
 
@@ -37,28 +41,36 @@ class ReportService(
                 ? AS year,
 
                 -- =========================================
-                -- RENT CHARGED
+                -- 💰 RENT CHARGED
                 -- =========================================
-                COALESCE(SUM(
-                    CASE
-                        WHEN l.entry_type = 'DEBIT'
-                        AND l.category = 'MONTHLY_RENT'
-                        THEN l.amount
-                        ELSE 0
-                    END
-                ), 0) AS rent_charged,
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN l.entry_type = 'DEBIT'
+                            AND l.category = 'MONTHLY_RENT'
+                            THEN l.amount
+
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS rent_charged,
 
                 -- =========================================
-                -- PAYMENTS
+                -- 💳 PAYMENTS RECEIVED
                 -- =========================================
-                COALESCE(SUM(
-                    CASE
-                        WHEN l.entry_type = 'CREDIT'
-                        AND l.category = 'RENT_PAYMENT'
-                        THEN l.amount
-                        ELSE 0
-                    END
-                ), 0) AS amount_paid
+                COALESCE(
+                    SUM(
+                        CASE
+                            WHEN l.entry_type = 'CREDIT'
+                            AND l.category = 'RENT_PAYMENT'
+                            THEN l.amount
+
+                            ELSE 0
+                        END
+                    ),
+                    0
+                ) AS amount_paid
 
             FROM tenancies t
 
@@ -82,10 +94,11 @@ class ReportService(
             GROUP BY
                 t.id,
                 te.full_name,
-                u.name,
+                u.unit_number,
                 p.id
 
-            ORDER BY u.name ASC
+            ORDER BY
+                u.unit_number ASC
         """.trimIndent()
 
         return jdbcTemplate.query(
@@ -103,6 +116,9 @@ class ReportService(
                 val balance =
                     rentCharged.subtract(amountPaid)
 
+                // =========================================
+                // 📌 PAYMENT STATUS
+                // =========================================
                 val status = when {
 
                     rentCharged <= BigDecimal.ZERO ->
@@ -119,6 +135,7 @@ class ReportService(
                 }
 
                 MonthlyTenantReportDto(
+
                     tenancyId = UUID.fromString(
                         rs.getString("tenancy_id")
                     ),
