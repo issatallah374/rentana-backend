@@ -8,6 +8,7 @@ AS $$
 DECLARE
     r RECORD;
 BEGIN
+
     FOR r IN
         SELECT
             t.id AS tenancy_id,
@@ -21,7 +22,8 @@ BEGIN
 
         -- Prevent double charge within same month
         IF r.last_rent_charged_date IS NULL
-           OR date_trunc('month', r.last_rent_charged_date) < date_trunc('month', now())
+           OR date_trunc('month', r.last_rent_charged_date)
+              < date_trunc('month', now())
         THEN
 
             INSERT INTO ledger_entries(
@@ -30,6 +32,8 @@ BEGIN
                 entry_type,
                 category,
                 amount,
+                entry_month,
+                entry_year,
                 created_at
             )
             VALUES (
@@ -38,9 +42,12 @@ BEGIN
                 'DEBIT',
                 'MONTHLY_RENT',
                 r.rent_amount,
+                EXTRACT(MONTH FROM now()),
+                EXTRACT(YEAR FROM now()),
                 now()
             );
 
+            -- Mark tenancy as charged for current month
             UPDATE tenancies
             SET last_rent_charged_date = now()
             WHERE id = r.tenancy_id;
@@ -48,5 +55,6 @@ BEGIN
         END IF;
 
     END LOOP;
+
 END;
 $$;

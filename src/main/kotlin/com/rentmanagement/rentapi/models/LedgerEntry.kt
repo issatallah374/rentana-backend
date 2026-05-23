@@ -25,12 +25,19 @@ data class LedgerEntry(
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
-    @Column(name = "entry_type", columnDefinition = "ledger_entry_type", nullable = false)
+    @Column(
+        name = "entry_type",
+        columnDefinition = "ledger_entry_type",
+        nullable = false
+    )
     val entryType: LedgerEntryType,
 
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.NAMED_ENUM)
-    @Column(name = "category", columnDefinition = "ledger_category")
+    @Column(
+        name = "category",
+        columnDefinition = "ledger_category"
+    )
     val category: LedgerCategory? = null,
 
     @Column(nullable = false)
@@ -41,6 +48,14 @@ data class LedgerEntry(
 
     @Column(name = "reference_id")
     val referenceId: UUID? = null,
+
+    // IMPORTANT FOR HISTORICAL REPORTING
+
+    @Column(name = "entry_month", nullable = false)
+    val entryMonth: Int,
+
+    @Column(name = "entry_year", nullable = false)
+    val entryYear: Int,
 
     @Column(name = "created_at", nullable = false)
     val createdAt: LocalDateTime = LocalDateTime.now()
