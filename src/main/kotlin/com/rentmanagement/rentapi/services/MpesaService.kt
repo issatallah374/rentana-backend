@@ -6,11 +6,10 @@ import com.rentmanagement.rentapi.repository.*
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.time.LocalDateTime
-import org.springframework.transaction.annotation.Transactional
-import java.security.Principal
-import java.util.*
+import java.util.UUID
 
 @Service
 class MpesaService(
@@ -24,24 +23,34 @@ class MpesaService(
     private val mpesaStkService: MpesaStkService
 ) {
 
-    private val log = LoggerFactory.getLogger(MpesaService::class.java)
-    private val objectMapper = ObjectMapper()
+    private val log =
+        LoggerFactory.getLogger(MpesaService::class.java)
+
+    private val objectMapper =
+        ObjectMapper()
 
     // =========================================================
     // 🔥 STK INIT (SERVER-CONTROLLED PRICING)
     // =========================================================
+
     fun initiateStkPush(
         phone: String,
         landlordId: String,
         planId: String
     ) {
 
-        val landlordUUID = UUID.fromString(landlordId)
-        val planUUID = UUID.fromString(planId)
+        val landlordUUID =
+            UUID.fromString(landlordId)
+
+        val planUUID =
+            UUID.fromString(planId)
 
         // ✅ VALIDATE PLAN EXISTS
-        val plan = subscriptionPlanRepository.findById(planUUID)
-            .orElseThrow { RuntimeException("Invalid plan selected") }
+        val plan =
+            subscriptionPlanRepository.findById(planUUID)
+                .orElseThrow {
+                    RuntimeException("Invalid plan selected")
+                }
 
         // ✅ USE SERVER PRICE (NO FRONTEND TRUST)
         mpesaStkService.stkPush(
@@ -51,43 +60,67 @@ class MpesaService(
             planId = planUUID
         )
 
-        log.info("🔥 STK TRIGGERED → landlord=$landlordUUID plan=$planUUID")
+        log.info(
+            "🔥 STK TRIGGERED → landlord=$landlordUUID plan=$planUUID"
+        )
     }
 
     // =========================================================
-// 🟢 C2B PAYMENTS (RENT)
-// =========================================================
-    fun processC2BPayment(payload: Map<String, Any>) {
+    // 🟢 C2B PAYMENTS (RENT)
+    // =========================================================
+
+    fun processC2BPayment(
+        payload: Map<String, Any>
+    ) {
 
         try {
 
-            val reference = payload["TransID"]?.toString()
-                ?: return log.error("❌ Missing TransID")
+            val reference =
+                payload["TransID"]?.toString()
+                    ?: return log.error("❌ Missing TransID")
 
-            val amount = payload["TransAmount"]?.toString()?.toBigDecimalOrNull()
-                ?: return log.error("❌ Missing amount")
+            val amount =
+                payload["TransAmount"]
+                    ?.toString()
+                    ?.toBigDecimalOrNull()
+                    ?: return log.error("❌ Missing amount")
 
-            val phone = payload["MSISDN"]?.toString()
+            val phone =
+                payload["MSISDN"]?.toString()
 
-            val safeAccount = payload["BillRefNumber"]?.toString()
-                ?.uppercase()
-                ?.replace("\\s".toRegex(), "")
-                ?.replace("-", "")
-                ?: return log.error("❌ Missing account")
+            val safeAccount =
+                payload["BillRefNumber"]
+                    ?.toString()
+                    ?.uppercase()
+                    ?.replace("\\s".toRegex(), "")
+                    ?.replace("-", "")
+                    ?: return log.error("❌ Missing account")
 
-            log.warn("🔥 C2B RECEIVED → ref=$reference amount=$amount account=$safeAccount phone=$phone")
+            log.warn(
+                "🔥 C2B RECEIVED → ref=$reference amount=$amount account=$safeAccount phone=$phone"
+            )
 
-            handlePayment(reference, amount, phone, safeAccount, payload)
+            handlePayment(
+                reference = reference,
+                amount = amount,
+                phone = phone,
+                account = safeAccount,
+                payload = payload
+            )
 
         } catch (e: Exception) {
-            log.error("❌ C2B FAILED", e)
+
+            log.error(
+                "❌ C2B FAILED",
+                e
+            )
         }
     }
 
-
     // =========================================================
-// 💰 RENT ENGINE
-// =========================================================
+    // 💰 RENT ENGINE
+    // =========================================================
+
     @Transactional
     private fun handlePayment(
         reference: String,
@@ -97,161 +130,245 @@ class MpesaService(
         payload: Map<String, Any>
     ) {
 
-        log.warn("🚀 START PAYMENT → ref=$reference account=$account amount=$amount")
+        log.warn(
+            "🚀 START PAYMENT → ref=$reference account=$account amount=$amount"
+        )
 
         // =====================================================
-        // 1. DUPLICATE CHECK (SAFE)
+        // 1. LOCK EXISTING M-PESA TRANSACTION IF PRESENT
         // =====================================================
-        val exists = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM mpesa_transactions WHERE transaction_code = ?",
-            Int::class.java,
-            reference
-        ) ?: 0
+        // This prevents double-processing when Safaricom retries
+        // the same callback or your retry service re-runs it.
+        // =====================================================
 
-        if (exists > 0) {
-
-            val processed = jdbcTemplate.queryForObject(
-                "SELECT processed FROM mpesa_transactions WHERE transaction_code = ?",
-                Boolean::class.java,
+        val existing =
+            jdbcTemplate.query(
+                """
+                SELECT processed
+                FROM mpesa_transactions
+                WHERE transaction_code = ?
+                FOR UPDATE
+                """.trimIndent(),
+                { rs, _ ->
+                    rs.getBoolean("processed")
+                },
                 reference
-            ) ?: false
+            )
 
-            if (processed) {
-                log.warn("⚠️ DUPLICATE PROCESSED → $reference")
+        if (existing.isNotEmpty()) {
+
+            val alreadyProcessed =
+                existing.first()
+
+            if (alreadyProcessed) {
+
+                log.warn(
+                    "⚠️ DUPLICATE ALREADY PROCESSED → $reference"
+                )
+
                 return
             }
 
-            log.warn("🔁 RETRYING EXISTING TRANSACTION → $reference")
+            log.warn(
+                "🔁 EXISTING UNPROCESSED TRANSACTION → $reference"
+            )
 
         } else {
-            // insert new
-        }
-        // =====================================================
-        // 2. SAVE RAW TRANSACTION
-        // =====================================================
-        jdbcTemplate.update(
-            """
-        INSERT INTO mpesa_transactions(
-            transaction_code,
-            phone_number,
-            account_reference,
-            amount,
-            raw_payload,
-            processed
-        )
-        VALUES (?, ?, ?, ?, ?::jsonb, false)
-        """.trimIndent(),
-            reference,
-            phone,
-            account,
-            amount,
-            objectMapper.writeValueAsString(payload)
-        )
 
-        log.info("📦 TRANSACTION SAVED → $reference")
+            // =====================================================
+            // 2. SAVE RAW TRANSACTION ONLY IF IT DOES NOT EXIST
+            // =====================================================
+
+            jdbcTemplate.update(
+                """
+                INSERT INTO mpesa_transactions(
+                    transaction_code,
+                    phone_number,
+                    account_reference,
+                    amount,
+                    raw_payload,
+                    processed,
+                    created_at,
+                    retry_count
+                )
+                VALUES (?, ?, ?, ?, ?::jsonb, false, NOW(), 0)
+                """.trimIndent(),
+                reference,
+                phone,
+                account,
+                amount,
+                objectMapper.writeValueAsString(payload)
+            )
+
+            log.info(
+                "📦 TRANSACTION SAVED → $reference"
+            )
+        }
 
         // =====================================================
         // 3. FIND UNIT
         // =====================================================
-        val unit = unitRepository.findByReferenceNumberIgnoreCase(account)
-            ?: throw RuntimeException("Unit not found")
+
+        val unit =
+            unitRepository.findByReferenceNumberIgnoreCase(account)
+                ?: throw RuntimeException(
+                    "Unit not found for account $account"
+                )
 
         // =====================================================
-        // 4. FIND TENANCY
+        // 4. FIND ACTIVE TENANCY
         // =====================================================
-        val tenancy = tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
-            ?: throw RuntimeException("No active tenancy")
+
+        val tenancy =
+            tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
+                ?: throw RuntimeException(
+                    "No active tenancy for account $account"
+                )
 
         // =====================================================
-        // 5. CALL DB FUNCTION (SAFE PARAMS)
+        // 5. PROCESS PAYMENT IN DATABASE
         // =====================================================
-        jdbcTemplate.update(
+        // IMPORTANT:
+        // process_payment is a PostgreSQL FUNCTION called by SELECT.
+        // Do NOT use jdbcTemplate.update("SELECT process_payment...")
+        // because SELECT returns a result row.
+        // =====================================================
+
+        jdbcTemplate.queryForObject(
             "SELECT process_payment(?, ?, ?)",
+            Void::class.java,
             tenancy.id,
             amount,
             reference
         )
 
-        log.info("💰 DB FUNCTION EXECUTED")
+        log.info(
+            "💰 DB FUNCTION EXECUTED → $reference"
+        )
 
         // =====================================================
-        // 6. MARK AS PROCESSED
+        // 6. MARK M-PESA TRANSACTION AS PROCESSED
         // =====================================================
+
         jdbcTemplate.update(
-            "UPDATE mpesa_transactions SET processed = true WHERE transaction_code = ?",
+            """
+            UPDATE mpesa_transactions
+            SET processed = true,
+                last_attempt_at = NOW(),
+                error_message = NULL
+            WHERE transaction_code = ?
+            """.trimIndent(),
             reference
         )
 
-        log.info("✅ PAYMENT MARKED PROCESSED → $reference")
+        log.info(
+            "✅ PAYMENT MARKED PROCESSED → $reference"
+        )
     }
 
     // =========================================================
     // 🟣 SUBSCRIPTION CALLBACK (PLAN-BASED, NO AMOUNT MATCH)
     // =========================================================
-    fun processSubscriptionCallback(payload: Map<String, Any>) {
+
+    fun processSubscriptionCallback(
+        payload: Map<String, Any>
+    ) {
 
         try {
 
-            log.info("🔥 STK CALLBACK RECEIVED")
+            log.info(
+                "🔥 STK CALLBACK RECEIVED"
+            )
 
-            val callback = payload["Body"]
-                ?.let { it as? Map<*, *> }
-                ?.get("stkCallback") as? Map<*, *>
-                ?: return log.error("❌ Missing stkCallback")
+            val callback =
+                payload["Body"]
+                    ?.let { it as? Map<*, *> }
+                    ?.get("stkCallback") as? Map<*, *>
+                    ?: return log.error("❌ Missing stkCallback")
 
-            val resultCode = (callback["ResultCode"] as? Number)?.toInt() ?: -1
-            val checkoutId = callback["CheckoutRequestID"]?.toString()
-                ?: return log.error("❌ Missing checkoutId")
+            val resultCode =
+                (callback["ResultCode"] as? Number)?.toInt() ?: -1
 
-            val stkRequest = stkRequestRepository.findByCheckoutRequestId(checkoutId)
-                ?: return log.error("❌ STK request not found")
+            val checkoutId =
+                callback["CheckoutRequestID"]?.toString()
+                    ?: return log.error("❌ Missing checkoutId")
+
+            val stkRequest =
+                stkRequestRepository.findByCheckoutRequestId(checkoutId)
+                    ?: return log.error("❌ STK request not found")
 
             // ✅ PREVENT DOUBLE PROCESSING
             if (stkRequest.status == "SUCCESS") {
-                log.warn("⚠️ Already processed → $checkoutId")
+
+                log.warn(
+                    "⚠️ Already processed → $checkoutId"
+                )
+
                 return
             }
 
             // ❌ FAILED PAYMENT
             if (resultCode != 0) {
-                stkRequest.status = "FAILED"
+
+                stkRequest.status =
+                    "FAILED"
+
                 stkRequestRepository.save(stkRequest)
-                log.warn("❌ SUBSCRIPTION FAILED → $checkoutId")
+
+                log.warn(
+                    "❌ SUBSCRIPTION FAILED → $checkoutId"
+                )
+
                 return
             }
 
-            val items = callback["CallbackMetadata"]
-                ?.let { it as? Map<*, *> }
-                ?.get("Item") as? List<Map<String, Any>>
-                ?: return log.error("❌ Missing metadata")
+            val items =
+                callback["CallbackMetadata"]
+                    ?.let { it as? Map<*, *> }
+                    ?.get("Item") as? List<Map<String, Any>>
+                    ?: return log.error("❌ Missing metadata")
 
-            var reference: String? = null
+            var reference: String? =
+                null
 
-            items.forEach {
-                if (it["Name"] == "MpesaReceiptNumber") {
-                    reference = it["Value"].toString()
+            items.forEach { item ->
+
+                if (item["Name"] == "MpesaReceiptNumber") {
+
+                    reference =
+                        item["Value"].toString()
                 }
             }
 
-            val safeReference = reference ?: return log.error("❌ Missing reference")
+            val safeReference =
+                reference
+                    ?: return log.error("❌ Missing reference")
 
             // =====================================================
             // ✅ PLAN FROM STK (SOURCE OF TRUTH)
             // =====================================================
-            val planId = stkRequest.planId
 
-            val plan = subscriptionPlanRepository.findById(planId).orElse(null)
-                ?: return log.error("❌ Plan not found")
+            val planId =
+                stkRequest.planId
 
-            val landlord = userRepository.findById(stkRequest.landlordId).orElseThrow()
+            val plan =
+                subscriptionPlanRepository.findById(planId).orElse(null)
+                    ?: return log.error("❌ Plan not found")
 
-            // DUPLICATE CHECK
+            val landlord =
+                userRepository.findById(stkRequest.landlordId).orElseThrow()
+
+            // ✅ PREVENT DUPLICATE SUBSCRIPTION TRANSACTION
             if (platformTransactionRepository.existsByReference(safeReference)) {
-                log.warn("⚠️ Duplicate subscription → $safeReference")
+
+                log.warn(
+                    "⚠️ Duplicate subscription → $safeReference"
+                )
+
                 return
             }
 
-            // 💾 SAVE TRANSACTION
+            // 💾 SAVE PLATFORM TRANSACTION
             platformTransactionRepository.save(
                 PlatformTransaction(
                     id = UUID.randomUUID(),
@@ -261,26 +378,42 @@ class MpesaService(
                 )
             )
 
-            // 💰 UPDATE WALLET
+            // 💰 UPDATE PLATFORM WALLET
             jdbcTemplate.update(
-                "UPDATE platform_wallet SET balance = balance + ?",
+                """
+                UPDATE platform_wallet
+                SET balance = balance + ?
+                """.trimIndent(),
                 plan.price
             )
 
-            // 🔄 EXPIRE OLD
+            // 🔄 EXPIRE OLD SUBSCRIPTIONS
             jdbcTemplate.update(
-                "UPDATE subscriptions SET status='EXPIRED' WHERE landlord_id=? AND status='ACTIVE'",
+                """
+                UPDATE subscriptions
+                SET status = 'EXPIRED'
+                WHERE landlord_id = ?
+                  AND status = 'ACTIVE'
+                """.trimIndent(),
                 landlord.id
             )
 
             // ✅ CREATE NEW SUBSCRIPTION
-            val start = LocalDateTime.now()
-            val end = start.plusMonths(1)
+            val start =
+                LocalDateTime.now()
+
+            val end =
+                start.plusMonths(1)
 
             jdbcTemplate.update(
                 """
                 INSERT INTO subscriptions (
-                    id, landlord_id, plan_id, start_date, end_date, status
+                    id,
+                    landlord_id,
+                    plan_id,
+                    start_date,
+                    end_date,
+                    status
                 )
                 VALUES (?, ?, ?, ?, ?, 'ACTIVE')
                 """.trimIndent(),
@@ -291,14 +424,22 @@ class MpesaService(
                 end
             )
 
-            // ✅ MARK SUCCESS
-            stkRequest.status = "SUCCESS"
+            // ✅ MARK STK REQUEST SUCCESS
+            stkRequest.status =
+                "SUCCESS"
+
             stkRequestRepository.save(stkRequest)
 
-            log.info("🎉 SUBSCRIPTION ACTIVATED → landlord=${landlord.id}")
+            log.info(
+                "🎉 SUBSCRIPTION ACTIVATED → landlord=${landlord.id}"
+            )
 
         } catch (e: Exception) {
-            log.error("❌ SUBSCRIPTION CALLBACK FAILED", e)
+
+            log.error(
+                "❌ SUBSCRIPTION CALLBACK FAILED",
+                e
+            )
         }
     }
 }
