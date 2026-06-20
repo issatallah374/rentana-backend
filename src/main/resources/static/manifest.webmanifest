@@ -1,0 +1,9 @@
+{
+  "name": "Rentana",
+  "short_name": "Rentana",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07050f",
+  "theme_color": "#0b0618",
+  "description": "Simple rent management for landlords and property managers."
+}

@@ -48,6 +48,22 @@ class SecurityConfig(
                 ).permitAll()
 
                 // =========================
+                // ✅ PUBLIC WEBSITE + DOWNLOAD
+                // =========================
+                it.requestMatchers(
+                    "/",
+                    "/index.html",
+                    "/favicon.svg",
+                    "/manifest.webmanifest",
+                    "/robots.txt",
+                    "/sitemap.xml",
+                    "/assets/**",
+                    "/download",
+                    "/download/**",
+                    "/app"
+                ).permitAll()
+
+                // =========================
                 // ✅ ADMIN HTML
                 // =========================
                 it.requestMatchers("/admin/**").permitAll()

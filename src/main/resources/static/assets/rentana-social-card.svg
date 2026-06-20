@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#07050f"/>
+      <stop offset="0.55" stop-color="#24104a"/>
+      <stop offset="1" stop-color="#090516"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#23d5ff"/>
+      <stop offset="0.55" stop-color="#a855f7"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="1060" cy="80" r="260" fill="#23d5ff" opacity="0.12"/>
+  <circle cx="120" cy="510" r="260" fill="#a855f7" opacity="0.22"/>
+  <rect x="70" y="70" width="1060" height="490" rx="48" fill="rgba(255,255,255,0.06)" stroke="#b66dff" stroke-opacity="0.35"/>
+  <rect x="115" y="120" width="98" height="98" rx="30" fill="url(#accent)"/>
+  <text x="144" y="188" font-family="Arial, sans-serif" font-size="58" font-weight="900" fill="#fff">R</text>
+  <text x="240" y="175" font-family="Arial, sans-serif" font-size="54" font-weight="900" fill="#fff">Rentana</text>
+  <text x="115" y="315" font-family="Arial, sans-serif" font-size="78" font-weight="900" fill="#fff">Know your rent money</text>
+  <text x="115" y="390" font-family="Arial, sans-serif" font-size="42" fill="#d8c9f5">Paid rent • balances • tenants • properties</text>
+  <text x="115" y="465" font-family="Arial, sans-serif" font-size="32" fill="#bcaee0">Simple Android app for landlords in Kenya</text>
+</svg>
