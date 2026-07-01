@@ -50,3 +50,12 @@ src/main/resources/application.yaml.backup*
 *.sql
 *.bak
 *.backup
+
+# Local machine / generated backups
+/local.properties
+/backup_before_*/
+/backup.dump
+/clean_backup.sql
+/kareemdb.sql
+/prod_schema.sql
+/frontend/backup.sql
