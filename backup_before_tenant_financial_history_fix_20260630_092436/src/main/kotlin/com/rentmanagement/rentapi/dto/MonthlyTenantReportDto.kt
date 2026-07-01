@@ -17,18 +17,15 @@ data class MonthlyTenantReportDto(
 
     val year: Int,
 
-    // True only for the current active tenancy. Historical rows stay visible for correct money totals.
-    val active: Boolean,
-
-    // Total rent charged for this month
+    // Total rent charged for month
     val rentCharged: BigDecimal,
 
-    // Total payments received for this month
+    // Total payments received for month
     val amountPaid: BigDecimal,
 
-    // Remaining balance for this month
+    // Remaining balance
     val balance: BigDecimal,
 
-    // PAID / PARTIAL / UNPAID / PAID_EXTRA / NO_CHARGE
+    // PAID / PARTIAL / UNPAID
     val status: String
 )

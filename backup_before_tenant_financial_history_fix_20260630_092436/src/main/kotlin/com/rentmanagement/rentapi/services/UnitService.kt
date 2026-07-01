@@ -24,27 +24,33 @@ class UnitService(
             .orElseThrow { RuntimeException("Unit not found") }
 
         // ===============================
-        // 🔥 ARCHIVE OLD TENANCY ONLY
+        // 🔥 DEACTIVATE OLD TENANCY
         // ===============================
-        // This must never delete old payments/ledger.
-        // It only frees the unit for the new tenancy.
         val existingTenancy =
             tenancyRepository.findByUnitIdAndIsActiveTrue(unitId)
 
         if (existingTenancy != null) {
 
             existingTenancy.isActive = false
-            tenancyRepository.saveAndFlush(existingTenancy)
+            tenancyRepository.save(existingTenancy)
 
-            syncTenantActiveFlag(existingTenancy.tenant.id!!)
+            val oldTenant = existingTenancy.tenant
+            oldTenant.isActive = false
+            tenantRepository.save(oldTenant)
+
+            tenancyRepository.flush()
         }
 
         // ===============================
-        // 🔥 CREATE OR REUSE TENANT
+        // 🔥 CREATE NEW TENANT
         // ===============================
-        // Phone is unique in DB. Reusing an inactive tenant avoids crashes when a caretaker
-        // reassigns a previous tenant with the same phone number.
-        val savedTenant = findOrCreateAssignableTenant(request)
+        val newTenant = Tenant(
+            fullName = request.fullName,
+            phoneNumber = request.phoneNumber,
+            isActive = true
+        )
+
+        val savedTenant = tenantRepository.save(newTenant)
 
         // ===============================
         // 🔥 CREATE NEW TENANCY
@@ -64,37 +70,5 @@ class UnitService(
         // ===============================
         // Rent will be charged ONLY by:
         // ✅ SQL function: charge_monthly_rent()
-    }
-
-    private fun findOrCreateAssignableTenant(request: AssignTenantRequest): Tenant {
-        val existingTenant = tenantRepository.findByPhoneNumber(request.phoneNumber)
-
-        if (existingTenant != null) {
-            val activeTenancies = tenancyRepository.countByTenant_IdAndIsActiveTrue(existingTenant.id!!)
-
-            if (activeTenancies > 0) {
-                throw RuntimeException("Tenant with this phone number is already active in another unit")
-            }
-
-            existingTenant.fullName = request.fullName
-            existingTenant.isActive = true
-            return tenantRepository.save(existingTenant)
-        }
-
-        val newTenant = Tenant(
-            fullName = request.fullName,
-            phoneNumber = request.phoneNumber,
-            isActive = true
-        )
-
-        return tenantRepository.save(newTenant)
-    }
-
-    private fun syncTenantActiveFlag(tenantId: UUID) {
-        val tenant = tenantRepository.findById(tenantId)
-            .orElseThrow { RuntimeException("Tenant not found") }
-
-        tenant.isActive = tenancyRepository.countByTenant_IdAndIsActiveTrue(tenantId) > 0
-        tenantRepository.save(tenant)
     }
 }

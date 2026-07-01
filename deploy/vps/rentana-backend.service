@@ -1,0 +1,19 @@
+[Unit]
+Description=Rentana Spring Boot Backend
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=rentana
+Group=rentana
+WorkingDirectory=/opt/rentana/backend
+Environment=RENTANA_BACKEND_ENV_FILE=/etc/rentana/rentana-backend.env
+EnvironmentFile=/etc/rentana/rentana-backend.env
+ExecStart=/usr/bin/java -jar /opt/rentana/backend/build/libs/app.jar
+Restart=always
+RestartSec=5
+SuccessExitStatus=143
+
+[Install]
+WantedBy=multi-user.target

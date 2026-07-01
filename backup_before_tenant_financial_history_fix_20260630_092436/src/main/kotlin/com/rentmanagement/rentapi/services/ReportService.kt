@@ -20,11 +20,6 @@ class ReportService(
         year: Int
     ): List<MonthlyTenantReportDto> {
 
-        // IMPORTANT FINANCIAL RULE:
-        // Do NOT filter only t.is_active = true here.
-        // If a tenant is deactivated/replaced, their old ledger rows must still count
-        // in the month they were charged/paid. Otherwise dashboard totals change simply
-        // because a caretaker replaced a tenant.
         val sql = """
             SELECT
                 t.id AS tenancy_id,
@@ -45,16 +40,16 @@ class ReportService(
 
                 ? AS year,
 
-                t.is_active AS active,
-
                 -- =========================================
-                -- 💰 RENT CHARGED IN THIS MONTH
+                -- 💰 RENT CHARGED
                 -- =========================================
                 COALESCE(
                     SUM(
                         CASE
                             WHEN l.entry_type = 'DEBIT'
+                            AND l.category = 'MONTHLY_RENT'
                             THEN l.amount
+
                             ELSE 0
                         END
                     ),
@@ -62,13 +57,15 @@ class ReportService(
                 ) AS rent_charged,
 
                 -- =========================================
-                -- 💳 PAYMENTS RECEIVED IN THIS MONTH
+                -- 💳 PAYMENTS RECEIVED
                 -- =========================================
                 COALESCE(
                     SUM(
                         CASE
                             WHEN l.entry_type = 'CREDIT'
+                            AND l.category = 'RENT_PAYMENT'
                             THEN l.amount
+
                             ELSE 0
                         END
                     ),
@@ -92,31 +89,16 @@ class ReportService(
                 AND l.entry_year = ?
 
             WHERE p.id = ?
-              AND (
-                    -- keep current active tenants in the report even before this month's charge exists
-                    t.is_active = true
-
-                    -- also keep historical/inactive tenants that have this month's financial history
-                    OR EXISTS (
-                        SELECT 1
-                        FROM ledger_entries lx
-                        WHERE lx.tenancy_id = t.id
-                          AND lx.entry_month = ?
-                          AND lx.entry_year = ?
-                    )
-              )
+              AND t.is_active = true
 
             GROUP BY
                 t.id,
                 te.full_name,
                 u.unit_number,
-                p.id,
-                t.is_active
+                p.id
 
             ORDER BY
-                u.unit_number ASC,
-                t.is_active DESC,
-                MIN(t.start_date) ASC
+                u.unit_number ASC
         """.trimIndent()
 
         return jdbcTemplate.query(
@@ -138,9 +120,6 @@ class ReportService(
                 // 📌 PAYMENT STATUS
                 // =========================================
                 val status = when {
-
-                    rentCharged <= BigDecimal.ZERO && amountPaid > BigDecimal.ZERO ->
-                        "PAID_EXTRA"
 
                     rentCharged <= BigDecimal.ZERO ->
                         "NO_CHARGE"
@@ -177,9 +156,6 @@ class ReportService(
                     year =
                         rs.getInt("year"),
 
-                    active =
-                        rs.getBoolean("active"),
-
                     rentCharged =
                         rentCharged,
 
@@ -198,9 +174,7 @@ class ReportService(
             year,
             month,
             year,
-            propertyId,
-            month,
-            year
+            propertyId
         )
     }
 }

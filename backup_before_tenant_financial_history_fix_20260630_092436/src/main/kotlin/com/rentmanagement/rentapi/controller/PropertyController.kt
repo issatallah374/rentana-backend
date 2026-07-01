@@ -127,17 +127,35 @@ class PropertyController(
             return ResponseEntity.status(403).build()
         }
 
-        // Do not depend on the old DB view here. Some old views joined ledger rows
-        // by property only, which multiplied totals when tenants were replaced.
-        // This repository query joins ledger rows by tenancy_id and is safe for history.
-        val summary = propertyRepository.getPropertySummary(propertyId)
+        val result = jdbcTemplate.queryForList(
+            """
+            SELECT *
+            FROM public.property_summary
+            WHERE property_id = ?
+            """.trimIndent(),
+            propertyId
+        )
+
+        if (result.isEmpty()) {
+            return ResponseEntity.ok(
+                PropertySummaryResponse(
+                    propertyId = id,
+                    unitCount = 0,
+                    activeTenancies = 0,
+                    totalExpected = 0.0,
+                    totalCollected = 0.0
+                )
+            )
+        }
+
+        val row = result[0]
 
         val response = PropertySummaryResponse(
-            propertyId = id,
-            unitCount = summary?.totalUnits?.toInt() ?: 0,
-            activeTenancies = summary?.activeTenancies?.toInt() ?: 0,
-            totalExpected = summary?.totalExpected ?: 0.0,
-            totalCollected = summary?.totalCollected ?: 0.0
+            propertyId = row["property_id"].toString(),
+            unitCount = (row["unit_count"] as? Number)?.toInt() ?: 0,
+            activeTenancies = (row["active_tenancies"] as? Number)?.toInt() ?: 0,
+            totalExpected = (row["total_expected"] as? Number)?.toDouble() ?: 0.0,
+            totalCollected = (row["total_collected"] as? Number)?.toDouble() ?: 0.0
         )
 
         return ResponseEntity.ok(response)

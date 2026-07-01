@@ -5,6 +5,8 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.math.BigDecimal
+import java.util.UUID
 
 @Service
 class MpesaRetryService(
@@ -73,27 +75,30 @@ class MpesaRetryService(
         // =====================================================
         // 🔒 LOCK REAL ROW
         // =====================================================
-        // DO NOT use COUNT(*) FOR UPDATE.
-        // PostgreSQL does not allow FOR UPDATE with aggregates.
         // This locks the actual mpesa_transactions row safely.
         // =====================================================
 
-        val lockedRows =
-            jdbcTemplate.query(
-                """
-                SELECT id
-                FROM mpesa_transactions
-                WHERE transaction_code = ?
-                  AND processed = false
-                FOR UPDATE
-                """.trimIndent(),
-                { rs, _ ->
-                    rs.getObject("id")
-                },
-                reference
-            )
+        val txRows = jdbcTemplate.query(
+            """
+            SELECT
+                id,
+                amount,
+                account_reference
+            FROM mpesa_transactions
+            WHERE transaction_code = ?
+              AND processed = false
+            FOR UPDATE
+            """.trimIndent(),
+            { rs, _ ->
+                RetryPaymentRow(
+                    amount = rs.getBigDecimal("amount"),
+                    accountReference = rs.getString("account_reference")
+                )
+            },
+            reference
+        )
 
-        if (lockedRows.isEmpty()) {
+        if (txRows.isEmpty()) {
 
             log.warn(
                 "⚠️ RETRY SKIPPED → already processed or missing ref=$reference"
@@ -102,16 +107,50 @@ class MpesaRetryService(
             return
         }
 
+        val tx = txRows.first()
+        val account = tx.accountReference
+            .uppercase()
+            .replace("\\s".toRegex(), "")
+            .replace("-", "")
+
         // =====================================================
-        // 🔁 RE-RUN DB FUNCTION
+        // 🔎 FIND UNIT BY NORMALIZED REFERENCE
         // =====================================================
-        // PostgreSQL function is called with SELECT, so use
-        // queryForObject instead of jdbcTemplate.update.
+
+        val unitIds = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM units
+            WHERE UPPER(REPLACE(REPLACE(reference_number, '-', ''), ' ', '')) =
+                  UPPER(REPLACE(REPLACE(?, '-', ''), ' ', ''))
+            LIMIT 1
+            """.trimIndent(),
+            { rs, _ ->
+                rs.getObject("id", UUID::class.java)
+            },
+            account
+        )
+
+        val unitId = unitIds.firstOrNull()
+            ?: throw RuntimeException("Unit not found for account $account")
+
+        // =====================================================
+        // 🔎 FIND BEST TENANCY FOR THIS RETRY
+        // =====================================================
+        // Same rule as live callbacks: old outstanding arrears are paid first;
+        // otherwise the current active tenancy receives the payment.
+
+        val tenancyId = resolvePaymentTenancyId(unitId, account)
+
+        // =====================================================
+        // 🔁 RE-RUN PAYMENT FUNCTION SAFELY
         // =====================================================
 
         jdbcTemplate.queryForObject(
-            "SELECT process_payment_by_reference(?)",
+            "SELECT process_payment(?, ?, ?)",
             Void::class.java,
+            tenancyId,
+            tx.amount,
             reference
         )
 
@@ -131,7 +170,61 @@ class MpesaRetryService(
         )
 
         log.info(
-            "✅ M-PESA RETRY PROCESSED → ref=$reference"
+            "✅ M-PESA RETRY PROCESSED → ref=$reference tenancy=$tenancyId"
         )
     }
+
+    private fun resolvePaymentTenancyId(
+        unitId: UUID,
+        account: String
+    ): UUID {
+
+        val tenancyIds = jdbcTemplate.query(
+            """
+            SELECT id
+            FROM (
+                SELECT
+                    t.id,
+                    t.is_active,
+                    t.start_date,
+                    t.created_at,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN le.entry_type = 'DEBIT' THEN le.amount
+                            WHEN le.entry_type = 'CREDIT' THEN -le.amount
+                            ELSE 0
+                        END
+                    ), 0) AS balance
+                FROM tenancies t
+                LEFT JOIN ledger_entries le
+                    ON le.tenancy_id = t.id
+                WHERE t.unit_id = ?
+                GROUP BY
+                    t.id,
+                    t.is_active,
+                    t.start_date,
+                    t.created_at
+            ) scored
+            ORDER BY
+                CASE WHEN balance > 0 THEN 0 ELSE 1 END,
+                CASE WHEN balance > 0 THEN start_date END ASC NULLS LAST,
+                CASE WHEN is_active THEN 0 ELSE 1 END,
+                start_date DESC,
+                created_at DESC
+            LIMIT 1
+            """.trimIndent(),
+            { rs, _ ->
+                rs.getObject("id", UUID::class.java)
+            },
+            unitId
+        )
+
+        return tenancyIds.firstOrNull()
+            ?: throw RuntimeException("No tenancy history found for account $account")
+    }
+
+    private data class RetryPaymentRow(
+        val amount: BigDecimal,
+        val accountReference: String
+    )
 }

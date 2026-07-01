@@ -7,33 +7,11 @@ import com.rentmanagement.rentapi.dto.TenantFinancialProjection
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
-import java.math.BigDecimal
 import java.util.UUID
 
 interface TenancyRepository : JpaRepository<Tenancy, UUID> {
 
     fun findByUnitIdAndIsActiveTrue(unitId: UUID): Tenancy?
-
-
-    fun countByTenant_IdAndIsActiveTrue(tenantId: UUID): Long
-
-    @Query(
-        value = """
-        SELECT COALESCE(SUM(
-            CASE
-                WHEN le.entry_type = 'DEBIT' THEN le.amount
-                WHEN le.entry_type = 'CREDIT' THEN -le.amount
-                ELSE 0
-            END
-        ), 0)
-        FROM ledger_entries le
-        WHERE le.tenancy_id = :tenancyId
-        """,
-        nativeQuery = true
-    )
-    fun getRawBalance(
-        @Param("tenancyId") tenancyId: UUID
-    ): BigDecimal
 
     // =====================================================
     // 🟢 ACTIVE TENANTS (ONLY STARTED TENANCIES)

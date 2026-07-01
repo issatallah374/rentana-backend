@@ -216,16 +216,14 @@ class MpesaService(
                 )
 
         // =====================================================
-        // 4. FIND BEST TENANCY FOR THIS PAYMENT
+        // 4. FIND ACTIVE TENANCY
         // =====================================================
-        // Do NOT blindly use the current active tenancy.
-        // If a callback/retry arrives after a caretaker replaced a tenant,
-        // old arrears must be paid against the old tenancy instead of the new one.
 
-        val tenancyId = resolvePaymentTenancyId(
-            unitId = unit.id!!,
-            account = account
-        )
+        val tenancy =
+            tenancyRepository.findByUnitIdAndIsActiveTrue(unit.id!!)
+                ?: throw RuntimeException(
+                    "No active tenancy for account $account"
+                )
 
         // =====================================================
         // 5. PROCESS PAYMENT IN DATABASE
@@ -239,7 +237,7 @@ class MpesaService(
         jdbcTemplate.queryForObject(
             "SELECT process_payment(?, ?, ?)",
             Void::class.java,
-            tenancyId,
+            tenancy.id,
             amount,
             reference
         )
@@ -266,59 +264,6 @@ class MpesaService(
         log.info(
             "✅ PAYMENT MARKED PROCESSED → $reference"
         )
-    }
-
-
-    private fun resolvePaymentTenancyId(
-        unitId: UUID,
-        account: String
-    ): UUID {
-
-        val tenancyIds = jdbcTemplate.query(
-            """
-            SELECT id
-            FROM (
-                SELECT
-                    t.id,
-                    t.is_active,
-                    t.start_date,
-                    t.created_at,
-                    COALESCE(SUM(
-                        CASE
-                            WHEN le.entry_type = 'DEBIT' THEN le.amount
-                            WHEN le.entry_type = 'CREDIT' THEN -le.amount
-                            ELSE 0
-                        END
-                    ), 0) AS balance
-                FROM tenancies t
-                LEFT JOIN ledger_entries le
-                    ON le.tenancy_id = t.id
-                WHERE t.unit_id = ?
-                GROUP BY
-                    t.id,
-                    t.is_active,
-                    t.start_date,
-                    t.created_at
-            ) scored
-            ORDER BY
-                -- first clear old/outstanding debt if this unit has arrears
-                CASE WHEN balance > 0 THEN 0 ELSE 1 END,
-                CASE WHEN balance > 0 THEN start_date END ASC NULLS LAST,
-
-                -- if there is no debt, normal current active tenancy wins
-                CASE WHEN is_active THEN 0 ELSE 1 END,
-                start_date DESC,
-                created_at DESC
-            LIMIT 1
-            """.trimIndent(),
-            { rs, _ ->
-                rs.getObject("id", UUID::class.java)
-            },
-            unitId
-        )
-
-        return tenancyIds.firstOrNull()
-            ?: throw RuntimeException("No tenancy history found for account $account")
     }
 
     // =========================================================

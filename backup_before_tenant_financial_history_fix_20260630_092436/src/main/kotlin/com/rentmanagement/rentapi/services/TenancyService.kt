@@ -36,9 +36,6 @@ class TenancyService(
             throw RuntimeException("Unit already occupied")
         }
 
-        tenant.isActive = true
-        tenantRepository.save(tenant)
-
         val tenancy = Tenancy(
             tenant = tenant,
             unit = unit,
@@ -81,9 +78,11 @@ class TenancyService(
             .orElseThrow { RuntimeException("Tenancy not found") }
 
         tenancy.isActive = false
-        tenancyRepository.saveAndFlush(tenancy)
+        tenancyRepository.save(tenancy)
 
-        syncTenantActiveFlag(tenancy.tenant.id!!)
+        val tenant = tenancy.tenant
+        tenant.isActive = false
+        tenantRepository.save(tenant)
     }
 
     // ---------------- ACTIVATE TENANCY ----------------
@@ -94,15 +93,8 @@ class TenancyService(
         val tenancy = tenancyRepository.findById(UUID.fromString(tenancyId))
             .orElseThrow { RuntimeException("Tenancy not found") }
 
-        val existingActiveForUnit =
-            tenancyRepository.findByUnitIdAndIsActiveTrue(tenancy.unit.id!!)
-
-        if (existingActiveForUnit != null && existingActiveForUnit.id != tenancy.id) {
-            throw RuntimeException("Unit already has another active tenancy")
-        }
-
         tenancy.isActive = true
-        tenancyRepository.saveAndFlush(tenancy)
+        tenancyRepository.save(tenancy)
 
         val tenant = tenancy.tenant
         tenant.isActive = true
@@ -146,19 +138,11 @@ class TenancyService(
         val tenancy = tenancyRepository.findById(UUID.fromString(tenancyId))
             .orElseThrow { RuntimeException("Tenancy not found") }
 
-        // This is an archive/soft delete only.
-        // Payments and ledger rows are never deleted here.
         tenancy.isActive = false
-        tenancyRepository.saveAndFlush(tenancy)
+        tenancyRepository.save(tenancy)
 
-        syncTenantActiveFlag(tenancy.tenant.id!!)
-    }
-
-    private fun syncTenantActiveFlag(tenantId: UUID) {
-        val tenant = tenantRepository.findById(tenantId)
-            .orElseThrow { RuntimeException("Tenant not found") }
-
-        tenant.isActive = tenancyRepository.countByTenant_IdAndIsActiveTrue(tenantId) > 0
+        val tenant = tenancy.tenant
+        tenant.isActive = false
         tenantRepository.save(tenant)
     }
 }

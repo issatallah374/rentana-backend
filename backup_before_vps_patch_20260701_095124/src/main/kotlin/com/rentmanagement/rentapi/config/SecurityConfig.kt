@@ -3,7 +3,6 @@ package com.rentmanagement.rentapi.config
 import com.rentmanagement.rentapi.security.JwtAuthFilter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
@@ -19,9 +18,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource
 @Configuration
 @EnableWebSecurity
 class SecurityConfig(
-    private val jwtAuthFilter: JwtAuthFilter,
-    @Value("\${app.cors.allowed-origins:https://rentana.online,https://www.rentana.online,http://localhost:5500,http://127.0.0.1:5500}")
-    private val allowedOriginsRaw: String
+    private val jwtAuthFilter: JwtAuthFilter
 ) {
 
     @Bean
@@ -115,13 +112,10 @@ class SecurityConfig(
 
         val config = CorsConfiguration()
 
-        config.allowedOrigins = allowedOriginsRaw
-            .split(",")
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
+        config.allowedOrigins = listOf("*")
         config.allowedMethods = listOf("GET", "POST", "PUT", "DELETE", "OPTIONS")
         config.allowedHeaders = listOf("*")
-        config.allowCredentials = true
+        config.allowCredentials = false
 
         val source = UrlBasedCorsConfigurationSource()
         source.registerCorsConfiguration("/**", config)
